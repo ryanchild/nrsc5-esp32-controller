@@ -15,29 +15,25 @@ An end-to-end **HD Radio (NRSC-5) network streamer and e-paper desktop controlle
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph NAS ["Synology NAS (Docker Compose)"]
-        SDR["RTL-SDR Dongle<br/>(/dev/bus/usb)"] --> NRSC5["nrsc5 Decoder"]
-        NRSC5 -- "Raw PCM" --> PUMP["Real-Time PCM Pump<br/>(Silence during retune)"]
-        PUMP --> FFMPEG["FFmpeg<br/>(192k MP3)"]
-        FFMPEG --> ICECAST["Icecast2<br/>(:8750/hdradio)"]
-        NRSC5 -- "PSD Metadata & MER" --> API["FastAPI Server<br/>(:8751)"]
-    end
-
-    subgraph Audio ["Network Audio"]
-        ICECAST -- "http://nas:8750/hdradio" --> SPEAKER["Sonos / Network Speaker"]
-        SONOS_API["node-sonos-http-api<br/>(:5005)"] --> SPEAKER
-    end
-
-    subgraph ESP32 ["CrowPanel 5.79\" E-Paper (ESP32-S3)"]
-        BTN_MENU["MENU Button (GPIO 2)"] -- "POST /api/tune" --> API
-        BTN_EXIT["EXIT Button (GPIO 1)"] -- "Play / Pause URL" --> SONOS_API
-        DIAL["3-Way Dial (GPIO 4/5/6)"] -- "Volume / Station" --> SONOS_API
-        API -- "GET /api/status" --> UI["792x272 E-Ink Dashboard"]
-        METEO["Open-Meteo API"] --> UI
-        NTP["NTP Clock"] --> UI
-    end
+```text
++-----------------------------------------------------------------------------------+
+| Synology NAS (Docker Compose)                                                     |
+|                                                                                   |
+|  [RTL-SDR USB] --> [nrsc5] --(PCM)--> [20ms Pacer] --> [FFmpeg] --> [Icecast2]    |
+|                       |              (Silence on tune)             (:8750/hdradio)|
+|                       +--(PSD / MER)--> [FastAPI :8751]                   |       |
++------------------------------------------------|--------------------------|-------+
+                                                 |                          |
+                  POST /api/tune                 | GET /api/status          | HTTP MP3 Stream
+                  (Next Station)                 v                          v
++--------------------------------------------------------+       +------------------+
+| Elecrow CrowPanel 5.79" E-Paper (ESP32-S3, 792x272)    |       | Sonos / Speakers |
+|                                                        |       +------------------+
+|  [MENU Button] ----> Cycles Station Presets            |                ^
+|  [EXIT Button] ----> Calls MEDIA_PLAY_URL / PAUSE_URL -+----------------+
+|  [3-Way Dial]  ----> Calls Volume +/- or Prev/Next     |   (via node-sonos-http-api
+|  [Open-Meteo + NTP] -> Weather & Clock                 |    or webhook)
++--------------------------------------------------------+
 ```
 
 ---
