@@ -5,7 +5,7 @@ An end-to-end **HD Radio (NRSC-5) network streamer and e-paper desktop controlle
 1. **`nas-stack/` (Synology NAS / Linux Docker Stack)**:
    - Tunes over-the-air North American digital HD Radio broadcasts (`HD1`, `HD2`, `HD3`, etc.) using an **RTL-SDR USB dongle** and [`theori-io/nrsc5`](https://github.com/theori-io/nrsc5).
    - Maintains a **persistent, uninterrupted MP3 Icecast stream** (`/hdradio`) so network speakers (Sonos, Home Assistant, VLC, etc.) **never disconnect or drop playback** while switching stations.
-   - Exposes a lightweight **FastAPI REST service** (`:8080`) for tuning channels, inspecting live Program Service Data (Title, Artist, Album, Station Callsign, MER/BER signal metrics), and a built-in web UI.
+   - Exposes a lightweight **FastAPI REST service** (`:8751`) for tuning channels, inspecting live Program Service Data (Title, Artist, Album, Station Callsign, MER/BER signal metrics), and a built-in web UI.
 2. **`esp32-firmware/` (Elecrow CrowPanel ESP32-S3 5.79" E-Paper Controller)**:
    - Custom firmware for the **Elecrow CrowPanel 5.79" E-Paper HMI Display** (`792×272` monochrome, dual SSD1683 controllers, ESP32-S3-WROOM-1-N8R8).
    - Displays the current station, HD subchannel badge, signal bars, track title, artist, album, large digital clock, and local weather (via Open-Meteo).
@@ -21,12 +21,12 @@ flowchart LR
         SDR["RTL-SDR Dongle<br/>(/dev/bus/usb)"] --> NRSC5["nrsc5 Decoder"]
         NRSC5 -- "Raw PCM" --> PUMP["Real-Time PCM Pump<br/>(Silence during retune)"]
         PUMP --> FFMPEG["FFmpeg<br/>(192k MP3)"]
-        FFMPEG --> ICECAST["Icecast2<br/>(:8000/hdradio)"]
-        NRSC5 -- "PSD Metadata & MER" --> API["FastAPI Server<br/>(:8080)"]
+        FFMPEG --> ICECAST["Icecast2<br/>(:8750/hdradio)"]
+        NRSC5 -- "PSD Metadata & MER" --> API["FastAPI Server<br/>(:8751)"]
     end
 
     subgraph Audio ["Network Audio"]
-        ICECAST -- "http://nas:8000/hdradio" --> SPEAKER["Sonos / Network Speaker"]
+        ICECAST -- "http://nas:8750/hdradio" --> SPEAKER["Sonos / Network Speaker"]
         SONOS_API["node-sonos-http-api<br/>(:5005)"] --> SPEAKER
     end
 
@@ -88,18 +88,18 @@ docker compose up -d --build
 ```
 
 ### 3. Verify Stream & API
-- **Web Dashboard**: Open `http://<nas-ip>:8080/` in a browser to see live signal status and test tuning.
-- **Audio Stream URL**: `http://<nas-ip>:8000/hdradio` (open in VLC or browser to test audio).
-- **Status JSON**: `curl http://<nas-ip>:8080/api/status`
+- **Web Dashboard**: Open `http://<nas-ip>:8751/` in a browser to see live signal status and test tuning.
+- **Audio Stream URL**: `http://<nas-ip>:8750/hdradio` (open in VLC or browser to test audio).
+- **Status JSON**: `curl http://<nas-ip>:8751/api/status`
 - **Tune Station**:
   ```bash
   # POST JSON
-  curl -X POST http://<nas-ip>:8080/api/tune \
+  curl -X POST http://<nas-ip>:8751/api/tune \
     -H "Content-Type: application/json" \
     -d '{"freq": 90.3, "program": 0}'
 
   # Or GET query parameters
-  curl "http://<nas-ip>:8080/api/tune?freq=90.3&program=0"
+  curl "http://<nas-ip>:8751/api/tune?freq=90.3&program=0"
   ```
   *Note: `program` is `0` for `HD1` (main channel), `1` for `HD2`, `2` for `HD3`, etc.*
 
@@ -107,7 +107,7 @@ docker compose up -d --build
 To play the HD Radio stream on Sonos:
 1. Open the **Sonos App** (or use TuneIn / custom radio station URL, or `node-sonos-http-api`'s preset/clip/stream feature) and point it to:
    ```text
-   http://<nas-ip>:8000/hdradio
+   http://<nas-ip>:8750/hdradio
    ```
 2. Because `nas-stack` continuously feeds silent PCM frames into FFmpeg while `nrsc5` retunes between frequencies, the Icecast mount point `/hdradio` **never drops its TCP stream**. Once Sonos is playing the stream, you can freely pause/play Sonos and cycle stations on the SDR without Sonos disconnecting.
 
@@ -137,7 +137,7 @@ cp include/config.example.h include/config.h
 
 Edit `include/config.h` to set:
 - **Wi-Fi credentials**: `WIFI_SSID` and `WIFI_PASSWORD`
-- **NAS API URL**: `NRSC5_API_BASE` (e.g. `"http://192.168.1.50:8080"`)
+- **NAS API URL**: `NRSC5_API_BASE` (e.g. `"http://192.168.1.50:8751"`)
 - **Play / Pause / Volume URLs**:
   ```cpp
   #define MEDIA_PLAY_URL        "http://192.168.1.50:5005/Living%20Room/play"

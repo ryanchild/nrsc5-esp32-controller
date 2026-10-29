@@ -11,7 +11,7 @@
 // 2. Synology NAS nrsc5 Controller API
 // ============================================================================
 // Base URL for the nrsc5 FastAPI service running on your NAS (no trailing slash)
-#define NRSC5_API_BASE "http://192.168.1.50:8080"
+#define NRSC5_API_BASE "http://192.168.1.50:8751"
 
 // ============================================================================
 // 3. Generic Media Player Webhook URLs (node-sonos-http-api, Home Assistant, etc.)

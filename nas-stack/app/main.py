@@ -42,7 +42,7 @@ def build_stream_url(request: Request) -> str:
     mount = os.environ.get("ICECAST_MOUNT", "/hdradio").strip() or "/hdradio"
     if not mount.startswith("/"):
         mount = "/" + mount
-    icecast_port = os.environ.get("ICECAST_EXTERNAL_PORT", os.environ.get("ICECAST_PORT", "8000"))
+    icecast_port = os.environ.get("ICECAST_EXTERNAL_PORT", "8750")
 
     public_host = os.environ.get("PUBLIC_HOST", "").strip()
     if public_host:

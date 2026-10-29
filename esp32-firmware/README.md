@@ -22,7 +22,7 @@ Custom PlatformIO firmware for the **Elecrow CrowPanel ESP32 5.79" E-Paper HMI D
 All settings are compiled from `include/config.h` (copied automatically from `include/config.example.h` on first build, and gitignored so your credentials are never committed):
 
 1. `WIFI_SSID` / `WIFI_PASSWORD`
-2. `NRSC5_API_BASE`: URL of your Synology NAS `nrsc5` container (e.g. `"http://192.168.1.50:8080"`)
+2. `NRSC5_API_BASE`: URL of your Synology NAS `nrsc5` container (e.g. `"http://192.168.1.50:8751"`)
 3. `MEDIA_PLAY_URL` / `MEDIA_PAUSE_URL` / `MEDIA_VOLUME_UP_URL` / `MEDIA_VOLUME_DOWN_URL`: HTTP endpoints for your audio system (such as `node-sonos-http-api`)
 4. `STATION_PRESETS[]`: List of `{ "Display Name", frequency_mhz, hd_program_index }`
 5. `WEATHER_LAT` / `WEATHER_LON` / `WEATHER_LABEL` / `WEATHER_UNITS_F`

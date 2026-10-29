@@ -57,6 +57,6 @@ COPY app /app/app
 
 RUN mkdir -p /data
 
-EXPOSE 8080
+EXPOSE 8751
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT:-8080}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT:-8751}"]

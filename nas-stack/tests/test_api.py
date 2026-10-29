@@ -31,7 +31,7 @@ def test_get_status_contract(tmp_path: Path) -> None:
     parse_nrsc5_line("MER: 12.3 dB", store)
     parse_nrsc5_line("BER: 0.0001", store)
 
-    res = client.get("/api/status", headers={"Host": "192.168.1.50:8080"})
+    res = client.get("/api/status", headers={"Host": "192.168.1.50:8751"})
     assert res.status_code == 200
     data = res.json()
 
@@ -66,7 +66,7 @@ def test_get_status_contract(tmp_path: Path) -> None:
     assert data["mer_db"] == 12.3
     assert data["ber"] == 0.0001
     assert data["synced"] is True
-    assert data["stream_url"] == "http://192.168.1.50:8000/hdradio"
+    assert data["stream_url"] == "http://192.168.1.50:8750/hdradio"
     assert isinstance(data["updated_at"], int)
 
 
