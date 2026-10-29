@@ -81,7 +81,7 @@ class TunerManager:
 
     def build_ffmpeg_cmd(self) -> List[str]:
         icecast_host = os.environ.get("ICECAST_HOST", "icecast").strip() or "icecast"
-        icecast_port = os.environ.get("ICECAST_PORT", "8000").strip() or "8000"
+        icecast_port = os.environ.get("ICECAST_PORT", "8750").strip() or "8750"
         icecast_pw = os.environ.get("ICECAST_SOURCE_PASSWORD", "nrsc5_internal").strip() or "nrsc5_internal"
         mount = os.environ.get("ICECAST_MOUNT", "/hdradio").strip() or "/hdradio"
         if not mount.startswith("/"):

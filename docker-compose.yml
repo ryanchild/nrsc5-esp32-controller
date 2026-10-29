@@ -9,8 +9,10 @@ services:
       - ICECAST_RELAY_PASSWORD=nrsc5_internal
       - ICECAST_PASSWORD=nrsc5_internal
       - ICECAST_HOSTNAME=localhost
+    command: >
+      sh -c "sed -i 's/<port>8000<\/port>/<port>${ICECAST_PORT:-8750}<\/port>/g' /etc/icecast2/icecast.xml && /start.sh"
     ports:
-      - "${ICECAST_PORT:-8750}:8000"
+      - "${ICECAST_PORT:-8750}:${ICECAST_PORT:-8750}"
 
   tuner:
     image: ghcr.io/ryanchild/nrsc5-esp32-controller:latest
@@ -30,8 +32,7 @@ services:
       - ./data:/data
     environment:
       - ICECAST_HOST=icecast
-      - ICECAST_PORT=8000
-      - ICECAST_EXTERNAL_PORT=${ICECAST_PORT:-8750}
+      - ICECAST_PORT=${ICECAST_PORT:-8750}
       - ICECAST_SOURCE_PASSWORD=nrsc5_internal
       - ICECAST_MOUNT=${ICECAST_MOUNT:-/hdradio}
       - MP3_BITRATE=${MP3_BITRATE:-192k}
