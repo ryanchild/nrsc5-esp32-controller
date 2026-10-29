@@ -4,11 +4,11 @@ services:
     container_name: hdradio-icecast
     restart: unless-stopped
     environment:
-      - ICECAST_SOURCE_PASSWORD=${ICECAST_SOURCE_PASSWORD:-hackme}
-      - ICECAST_ADMIN_PASSWORD=${ICECAST_ADMIN_PASSWORD:-hackme_admin}
-      - ICECAST_RELAY_PASSWORD=${ICECAST_RELAY_PASSWORD:-hackme_relay}
-      - ICECAST_PASSWORD=${ICECAST_SOURCE_PASSWORD:-hackme}
-      - ICECAST_HOSTNAME=${ICECAST_HOSTNAME:-localhost}
+      - ICECAST_SOURCE_PASSWORD=nrsc5_internal
+      - ICECAST_ADMIN_PASSWORD=nrsc5_internal
+      - ICECAST_RELAY_PASSWORD=nrsc5_internal
+      - ICECAST_PASSWORD=nrsc5_internal
+      - ICECAST_HOSTNAME=localhost
     ports:
       - "${ICECAST_PORT:-8750}:8000"
 
@@ -32,8 +32,7 @@ services:
       - ICECAST_HOST=icecast
       - ICECAST_PORT=8000
       - ICECAST_EXTERNAL_PORT=${ICECAST_PORT:-8750}
-      - ICECAST_SOURCE_PASSWORD=${ICECAST_SOURCE_PASSWORD:-hackme}
-      - ICECAST_ADMIN_PASSWORD=${ICECAST_ADMIN_PASSWORD:-hackme_admin}
+      - ICECAST_SOURCE_PASSWORD=nrsc5_internal
       - ICECAST_MOUNT=${ICECAST_MOUNT:-/hdradio}
       - MP3_BITRATE=${MP3_BITRATE:-192k}
       - DEFAULT_FREQ=${DEFAULT_FREQ:-90.3}
