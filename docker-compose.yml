@@ -13,6 +13,7 @@ services:
       - "${ICECAST_PORT:-8000}:8000"
 
   tuner:
+    image: ghcr.io/ryanchild/nrsc5-esp32-controller:latest
     build:
       context: ./nas-stack
       dockerfile: Dockerfile
