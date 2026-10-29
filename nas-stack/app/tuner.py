@@ -1,0 +1,441 @@
+import logging
+import os
+import queue
+import shutil
+import subprocess
+import threading
+import time
+from pathlib import Path
+from typing import List, Optional
+
+from app.parser import parse_nrsc5_line
+from app.state import StateStore
+
+logger = logging.getLogger(__name__)
+
+SAMPLE_RATE = 44100
+CHANNELS = 2
+BYTES_PER_SAMPLE = 2  # s16le
+BYTES_PER_SECOND = SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE  # 176,400 bytes/sec
+CHUNK_DURATION_SEC = 0.02  # 20ms chunks
+CHUNK_BYTES = int(BYTES_PER_SECOND * CHUNK_DURATION_SEC)  # 3,528 bytes
+SILENCE_CHUNK = b"\x00" * CHUNK_BYTES
+
+
+def strip_wav_header_if_present(data: bytes) -> bytes:
+    """If data starts with a 44-byte RIFF/WAVE header, strip it so raw PCM remains."""
+    if len(data) >= 44 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return data[44:]
+    return data
+
+
+class TunerManager:
+    """Manages the persistent ffmpeg Icecast source and the retunable nrsc5 process."""
+
+    def __init__(
+        self,
+        store: StateStore,
+        debounce_sec: float = 0.3,
+        enable_processes: Optional[bool] = None,
+    ) -> None:
+        self.store = store
+        self.debounce_sec = debounce_sec
+        if enable_processes is None:
+            enable_processes = os.environ.get("DISABLE_TUNER_PROCESSES", "0") != "1"
+        self.enable_processes = enable_processes
+
+        self._running = False
+        self._proc_lock = threading.Lock()
+        self._tune_lock = threading.Lock()
+
+        self._ffmpeg_proc: Optional[subprocess.Popen] = None
+        self._nrsc5_proc: Optional[subprocess.Popen] = None
+        self._nrsc5_generation = 0
+
+        self._debounce_timer: Optional[threading.Timer] = None
+        self._pending_target: Optional[tuple[float, int]] = None
+
+        # Bounded queue of 20ms PCM chunks (~0.5s buffer max to keep switching snappy)
+        self._pcm_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=25)
+        self._pacer_thread: Optional[threading.Thread] = None
+        self._last_audio_time: float = 0.0
+        self._tune_started_time: float = time.monotonic()
+
+    def build_nrsc5_cmd(self, freq: float, program: int) -> List[str]:
+        cmd = ["nrsc5"]
+        gain = os.environ.get("RTL_GAIN", "").strip()
+        if gain:
+            cmd.extend(["-g", gain])
+
+        ppm = os.environ.get("RTL_PPM", "").strip()
+        if ppm:
+            cmd.extend(["-p", ppm])
+
+        dev_idx = os.environ.get("RTL_DEVICE_INDEX", "0").strip()
+        if dev_idx and dev_idx != "0":
+            cmd.extend(["-d", dev_idx])
+
+        # -o - -t raw outputs raw s16le 44.1kHz stereo PCM to stdout
+        cmd.extend(["-o", "-", "-t", "raw", f"{freq:.1f}", str(program)])
+        return cmd
+
+    def build_ffmpeg_cmd(self) -> List[str]:
+        icecast_host = os.environ.get("ICECAST_HOST", "icecast").strip() or "icecast"
+        icecast_port = os.environ.get("ICECAST_PORT", "8000").strip() or "8000"
+        icecast_pw = os.environ.get("ICECAST_SOURCE_PASSWORD", "hackme").strip() or "hackme"
+        mount = os.environ.get("ICECAST_MOUNT", "/hdradio").strip() or "/hdradio"
+        if not mount.startswith("/"):
+            mount = "/" + mount
+        bitrate = os.environ.get("MP3_BITRATE", "192k").strip() or "192k"
+
+        icecast_url = f"icecast://source:{icecast_pw}@{icecast_host}:{icecast_port}{mount}"
+        return [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-f",
+            "s16le",
+            "-ar",
+            str(SAMPLE_RATE),
+            "-ac",
+            str(CHANNELS),
+            "-i",
+            "pipe:0",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            bitrate,
+            "-content_type",
+            "audio/mpeg",
+            "-ice_name",
+            "NRSC-5 HD Radio",
+            "-f",
+            "mp3",
+            icecast_url,
+        ]
+
+    def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        if not self.enable_processes:
+            logger.info("TunerManager started with subprocesses disabled (test mode).")
+            return
+
+        self._pacer_thread = threading.Thread(
+            target=self._audio_pacer_loop, name="ffmpeg-audio-pacer", daemon=True
+        )
+        self._pacer_thread.start()
+
+        freq, program = self.store.get_freq_program()
+        self._spawn_nrsc5(freq, program)
+
+    def stop(self) -> None:
+        self._running = False
+        with self._tune_lock:
+            if self._debounce_timer is not None:
+                self._debounce_timer.cancel()
+                self._debounce_timer = None
+        self._terminate_nrsc5()
+        self._terminate_ffmpeg()
+        if self._pacer_thread is not None and self._pacer_thread.is_alive():
+            self._pacer_thread.join(timeout=2.0)
+
+    def request_tune(self, freq: float, program: int) -> None:
+        """Update state immediately and schedule debounced nrsc5 restart."""
+        freq = round(float(freq), 1)
+        program = int(program)
+        self.store.reset_for_tune(freq, program)
+        self._flush_pcm_queue()
+
+        if not self.enable_processes:
+            return
+
+        with self._tune_lock:
+            self._pending_target = (freq, program)
+            if self._debounce_timer is not None:
+                self._debounce_timer.cancel()
+            if self.debounce_sec <= 0:
+                self._execute_pending_tune()
+            else:
+                self._debounce_timer = threading.Timer(
+                    self.debounce_sec, self._execute_pending_tune
+                )
+                self._debounce_timer.daemon = True
+                self._debounce_timer.start()
+
+    def _execute_pending_tune(self) -> None:
+        with self._tune_lock:
+            target = self._pending_target
+            self._pending_target = None
+            self._debounce_timer = None
+        if target is None or not self._running:
+            return
+        freq, program = target
+        self._spawn_nrsc5(freq, program)
+
+    def _flush_pcm_queue(self) -> None:
+        while True:
+            try:
+                self._pcm_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def _ensure_ffmpeg_running(self) -> Optional[subprocess.Popen]:
+        with self._proc_lock:
+            if self._ffmpeg_proc is not None and self._ffmpeg_proc.poll() is None:
+                return self._ffmpeg_proc
+
+            cmd = self.build_ffmpeg_cmd()
+            try:
+                logger.info("Starting ffmpeg Icecast encoder: %s", " ".join(cmd[:-1]))
+                self._ffmpeg_proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+                threading.Thread(
+                    target=self._drain_ffmpeg_stderr,
+                    args=(self._ffmpeg_proc,),
+                    daemon=True,
+                ).start()
+                return self._ffmpeg_proc
+            except FileNotFoundError:
+                logger.error("ffmpeg binary not found in PATH")
+                return None
+            except Exception as exc:
+                logger.error("Failed to start ffmpeg: %s", exc)
+                return None
+
+    def _drain_ffmpeg_stderr(self, proc: subprocess.Popen) -> None:
+        if proc.stderr is None:
+            return
+        try:
+            for raw_line in iter(proc.stderr.readline, b""):
+                if not raw_line:
+                    break
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if line:
+                    logger.debug("[ffmpeg] %s", line)
+        except Exception:
+            pass
+
+    def _terminate_ffmpeg(self) -> None:
+        with self._proc_lock:
+            proc = self._ffmpeg_proc
+            self._ffmpeg_proc = None
+        if proc is not None:
+            self._stop_process(proc, "ffmpeg")
+
+    def _spawn_nrsc5(self, freq: float, program: int) -> None:
+        self._terminate_nrsc5()
+        self._flush_pcm_queue()
+
+        with self._proc_lock:
+            self._nrsc5_generation += 1
+            gen = self._nrsc5_generation
+            self._tune_started_time = time.monotonic()
+
+            cmd = self.build_nrsc5_cmd(freq, program)
+            try:
+                logger.info("Spawning nrsc5 (gen %d): %s", gen, " ".join(cmd))
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+                self._nrsc5_proc = proc
+            except FileNotFoundError:
+                logger.error("nrsc5 binary not found in PATH")
+                self.store.update(state="error", synced=False)
+                return
+            except Exception as exc:
+                logger.error("Failed to spawn nrsc5: %s", exc)
+                self.store.update(state="error", synced=False)
+                return
+
+        threading.Thread(
+            target=self._read_nrsc5_stdout,
+            args=(proc, gen),
+            name=f"nrsc5-stdout-{gen}",
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=self._read_nrsc5_stderr,
+            args=(proc, gen),
+            name=f"nrsc5-stderr-{gen}",
+            daemon=True,
+        ).start()
+
+    def _terminate_nrsc5(self) -> None:
+        with self._proc_lock:
+            proc = self._nrsc5_proc
+            self._nrsc5_proc = None
+        if proc is not None:
+            self._stop_process(proc, "nrsc5")
+
+    @staticmethod
+    def _stop_process(proc: subprocess.Popen, name: str) -> None:
+        if proc.poll() is not None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=1.5)
+        except subprocess.TimeoutExpired:
+            logger.warning("%s did not terminate within 1.5s; killing", name)
+            try:
+                proc.kill()
+                proc.wait(timeout=1.0)
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.debug("Error stopping %s: %s", name, exc)
+
+    def _read_nrsc5_stdout(self, proc: subprocess.Popen, gen: int) -> None:
+        if proc.stdout is None:
+            return
+        first_chunk = True
+        leftover = b""
+        try:
+            while self._running and proc.poll() is None:
+                data = proc.stdout.read(CHUNK_BYTES - len(leftover))
+                if not data:
+                    break
+                if gen != self._nrsc5_generation:
+                    break
+                if first_chunk:
+                    first_chunk = False
+                    data = strip_wav_header_if_present(data)
+                buf = leftover + data
+                while len(buf) >= CHUNK_BYTES:
+                    chunk = buf[:CHUNK_BYTES]
+                    buf = buf[CHUNK_BYTES:]
+                    self._last_audio_time = time.monotonic()
+                    if self.store._state.state in ("tuning", "no_signal"):
+                        self.store.update(state="playing", synced=True)
+                    try:
+                        self._pcm_queue.put_nowait(chunk)
+                    except queue.Full:
+                        try:
+                            self._pcm_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        try:
+                            self._pcm_queue.put_nowait(chunk)
+                        except queue.Full:
+                            pass
+                leftover = buf
+        except Exception as exc:
+            logger.debug("nrsc5 stdout reader ended: %s", exc)
+
+    def _read_nrsc5_stderr(self, proc: subprocess.Popen, gen: int) -> None:
+        if proc.stderr is None:
+            return
+        try:
+            for raw_line in iter(proc.stderr.readline, b""):
+                if not raw_line:
+                    break
+                if gen != self._nrsc5_generation:
+                    break
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                logger.debug("[nrsc5] %s", line)
+                parse_nrsc5_line(line, self.store)
+                lower = line.lower()
+                if "no device found" in lower or "usb_open error" in lower or "failed to open rtlsdr" in lower:
+                    self.store.update(state="error", synced=False)
+        except Exception as exc:
+            logger.debug("nrsc5 stderr reader ended: %s", exc)
+        finally:
+            rc = proc.poll()
+            if self._running and gen == self._nrsc5_generation:
+                logger.warning("nrsc5 process (gen %d) exited unexpectedly with code %s", gen, rc)
+                if self.store._state.state != "error":
+                    self.store.update(state="no_signal", synced=False)
+
+    def _audio_pacer_loop(self) -> None:
+        """Continuously feed 20ms s16le chunks to ffmpeg at real-time pace."""
+        next_tick = time.monotonic()
+        last_nrsc5_restart_attempt = 0.0
+
+        while self._running:
+            now = time.monotonic()
+            if now < next_tick:
+                time.sleep(next_tick - now)
+            next_tick += CHUNK_DURATION_SEC
+            if time.monotonic() - next_tick > 0.2:
+                next_tick = time.monotonic()
+
+            try:
+                chunk = self._pcm_queue.get_nowait()
+            except queue.Empty:
+                chunk = SILENCE_CHUNK
+                elapsed_since_tune = time.monotonic() - self._tune_started_time
+                if (
+                    self.store._state.state == "tuning"
+                    and not self.store._state.synced
+                    and elapsed_since_tune > 12.0
+                ):
+                    self.store.update(state="no_signal")
+
+            proc = self._ensure_ffmpeg_running()
+            if proc is None or proc.stdin is None:
+                time.sleep(0.5)
+                next_tick = time.monotonic()
+                continue
+
+            try:
+                proc.stdin.write(chunk)
+            except (BrokenPipeError, OSError) as exc:
+                logger.warning("ffmpeg stdin write failed (%s); restarting ffmpeg", exc)
+                self._terminate_ffmpeg()
+                next_tick = time.monotonic()
+
+            if (
+                not self.is_nrsc5_running()
+                and self._pending_target is None
+                and time.monotonic() - last_nrsc5_restart_attempt > 5.0
+            ):
+                last_nrsc5_restart_attempt = time.monotonic()
+                freq, program = self.store.get_freq_program()
+                self._spawn_nrsc5(freq, program)
+
+    def is_nrsc5_running(self) -> bool:
+        with self._proc_lock:
+            return self._nrsc5_proc is not None and self._nrsc5_proc.poll() is None
+
+    def is_ffmpeg_running(self) -> bool:
+        with self._proc_lock:
+            return self._ffmpeg_proc is not None and self._ffmpeg_proc.poll() is None
+
+    @staticmethod
+    def is_device_present() -> bool:
+        """Check whether an RTL-SDR / USB device is accessible in the container."""
+        sys_usb = Path("/sys/bus/usb/devices")
+        if sys_usb.exists():
+            try:
+                for dev_dir in sys_usb.iterdir():
+                    vid_file = dev_dir / "idVendor"
+                    if vid_file.exists():
+                        vid = vid_file.read_text(encoding="utf-8").strip().lower()
+                        if vid == "0bda":
+                            return True
+            except Exception:
+                pass
+
+        dev_usb = Path("/dev/bus/usb")
+        if dev_usb.exists():
+            try:
+                for bus in dev_usb.iterdir():
+                    if bus.is_dir():
+                        for _ in bus.iterdir():
+                            return True
+            except Exception:
+                pass
+
+        return shutil.which("nrsc5") is not None and dev_usb.exists()

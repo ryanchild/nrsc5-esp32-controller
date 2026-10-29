@@ -1,0 +1,47 @@
+services:
+  icecast:
+    image: moul/icecast:latest
+    container_name: hdradio-icecast
+    restart: unless-stopped
+    environment:
+      - ICECAST_SOURCE_PASSWORD=${ICECAST_SOURCE_PASSWORD:-hackme}
+      - ICECAST_ADMIN_PASSWORD=${ICECAST_ADMIN_PASSWORD:-hackme_admin}
+      - ICECAST_RELAY_PASSWORD=${ICECAST_RELAY_PASSWORD:-hackme_relay}
+      - ICECAST_PASSWORD=${ICECAST_SOURCE_PASSWORD:-hackme}
+      - ICECAST_HOSTNAME=${ICECAST_HOSTNAME:-localhost}
+    ports:
+      - "${ICECAST_PORT:-8000}:8000"
+
+  tuner:
+    build:
+      context: ./nas-stack
+      dockerfile: Dockerfile
+    container_name: hdradio-tuner
+    init: true
+    restart: unless-stopped
+    privileged: true
+    depends_on:
+      - icecast
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - ./data:/data
+    environment:
+      - ICECAST_HOST=icecast
+      - ICECAST_PORT=8000
+      - ICECAST_EXTERNAL_PORT=${ICECAST_PORT:-8000}
+      - ICECAST_SOURCE_PASSWORD=${ICECAST_SOURCE_PASSWORD:-hackme}
+      - ICECAST_ADMIN_PASSWORD=${ICECAST_ADMIN_PASSWORD:-hackme_admin}
+      - ICECAST_MOUNT=${ICECAST_MOUNT:-/hdradio}
+      - MP3_BITRATE=${MP3_BITRATE:-192k}
+      - DEFAULT_FREQ=${DEFAULT_FREQ:-90.3}
+      - DEFAULT_PROGRAM=${DEFAULT_PROGRAM:-0}
+      - RTL_GAIN=${RTL_GAIN:-}
+      - RTL_PPM=${RTL_PPM:-}
+      - RTL_DEVICE_INDEX=${RTL_DEVICE_INDEX:-0}
+      - API_PORT=${API_PORT:-8080}
+      - PUBLIC_HOST=${PUBLIC_HOST:-}
+      - STATE_FILE=/data/state.json
+    ports:
+      - "${API_PORT:-8080}:${API_PORT:-8080}"

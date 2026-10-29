@@ -1,0 +1,6 @@
+.pio/
+.vscode/
+include/config.h
+*.bak
+*.swp
+.DS_Store

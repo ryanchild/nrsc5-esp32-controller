@@ -147,3 +147,20 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# --- Python (nas-stack) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# --- Local secrets ---
+.env
+
+# --- PlatformIO / firmware ---
+.pio/
+esp32-firmware/include/config.h
+
+# --- macOS ---
+.DS_Store
