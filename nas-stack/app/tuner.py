@@ -219,7 +219,7 @@ class TunerManager:
                     break
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if line:
-                    logger.debug("[ffmpeg] %s", line)
+                    logger.warning("[ffmpeg] %s", line)
         except Exception:
             pass
 
@@ -344,7 +344,7 @@ class TunerManager:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
-                logger.debug("[nrsc5] %s", line)
+                logger.info("[nrsc5] %s", line)
                 parse_nrsc5_line(line, self.store)
                 lower = line.lower()
                 if "no device found" in lower or "usb_open error" in lower or "failed to open rtlsdr" in lower:

@@ -14,6 +14,7 @@ services:
 
   tuner:
     image: ghcr.io/ryanchild/nrsc5-esp32-controller:latest
+    pull_policy: always
     container_name: hdradio-tuner
     init: true
     restart: unless-stopped
@@ -27,6 +28,7 @@ services:
       - ./data:/data
     environment:
       - ICECAST_HOST=icecast
+      - ICECAST_PORT=8000
       - ICECAST_EXTERNAL_PORT=${ICECAST_PORT:-8750}
       - ICECAST_SOURCE_PASSWORD=nrsc5_internal
       - ICECAST_MOUNT=${ICECAST_MOUNT:-/hdradio}
