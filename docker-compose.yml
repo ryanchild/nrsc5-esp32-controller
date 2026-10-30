@@ -16,9 +16,6 @@ services:
 
   tuner:
     image: ghcr.io/ryanchild/nrsc5-esp32-controller:latest
-    build:
-      context: ./nas-stack
-      dockerfile: Dockerfile
     container_name: hdradio-tuner
     init: true
     restart: unless-stopped
