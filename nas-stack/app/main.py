@@ -245,10 +245,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 """
 
 
+class _QuietPollingAccessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if '"GET /api/status ' in msg or '"GET /api/health ' in msg:
+            return False
+        return True
+
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+logging.getLogger("uvicorn.access").addFilter(_QuietPollingAccessFilter())
 
 
 def create_app(

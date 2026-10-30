@@ -454,15 +454,32 @@ class TunerManager:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
-                logger.info("[nrsc5] %s", line)
-                parse_nrsc5_line(line, self.store)
+                prev_title = self.store._state.title
+                prev_artist = self.store._state.artist
+                prev_station = self.store._state.station_name
+                prev_synced = self.store._state.synced
+
+                parsed = parse_nrsc5_line(line, self.store)
                 lower = line.lower()
+
                 if "usb_claim_interface error" in lower:
+                    logger.error("[nrsc5] %s", line)
                     # Schedule a USBDEVFS_RESET before the next spawn so the busy interface is cleared
                     self._needs_usb_reset = True
                     self.store.update(state="error", synced=False)
                 elif "no device found" in lower or "usb_open error" in lower or "failed to open rtlsdr" in lower:
+                    logger.error("[nrsc5] %s", line)
                     self.store.update(state="error", synced=False)
+                elif "synced" in parsed and parsed["synced"] != prev_synced:
+                    logger.info("[nrsc5] %s", line)
+                elif "station_name" in parsed and parsed["station_name"] != prev_station:
+                    logger.info("[nrsc5] %s", line)
+                elif "title" in parsed and parsed["title"] and parsed["title"] != prev_title:
+                    logger.info("[nrsc5] Now Playing: %s", parsed["title"])
+                elif "artist" in parsed and parsed["artist"] and parsed["artist"] != prev_artist:
+                    logger.info("[nrsc5] Artist: %s", parsed["artist"])
+                else:
+                    logger.debug("[nrsc5] %s", line)
         except Exception as exc:
             logger.debug("nrsc5 stderr reader ended: %s", exc)
         finally:
