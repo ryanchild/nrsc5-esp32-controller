@@ -1,3 +1,4 @@
+import fcntl
 import logging
 import os
 import queue
@@ -22,12 +23,78 @@ CHUNK_DURATION_SEC = 0.02  # 20ms chunks
 CHUNK_BYTES = int(BYTES_PER_SECOND * CHUNK_DURATION_SEC)  # 3,528 bytes
 SILENCE_CHUNK = b"\x00" * CHUNK_BYTES
 
+# Linux ioctl USBDEVFS_RESET = _IO('U', 20) = 0x5514
+USBDEVFS_RESET = 0x5514
+
 
 def strip_wav_header_if_present(data: bytes) -> bytes:
     """If data starts with a 44-byte RIFF/WAVE header, strip it so raw PCM remains."""
     if len(data) >= 44 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
         return data[44:]
     return data
+
+
+def prepare_rtlsdr_usb_device(reset_usb: bool = False) -> None:
+    """Unbind any kernel DVB drivers (e.g. dvb_usb_rtl28xxu) holding the RTL-SDR
+    interface and optionally issue a USBDEVFS_RESET ioctl so libusb can claim it.
+    """
+    sys_usb = Path("/sys/bus/usb/devices")
+    if not sys_usb.exists():
+        return
+
+    try:
+        for dev_dir in sys_usb.iterdir():
+            vid_file = dev_dir / "idVendor"
+            if not vid_file.exists():
+                continue
+            vid = vid_file.read_text(encoding="utf-8").strip().lower()
+            if vid != "0bda":
+                continue
+
+            # Unbind kernel drivers from all interfaces of this Realtek USB device (e.g. 1-1:1.0, 1-1:1.1)
+            dev_name = dev_dir.name
+            for iface_dir in sys_usb.glob(f"{dev_name}:*"):
+                driver_link = iface_dir / "driver"
+                if driver_link.exists():
+                    try:
+                        driver_name = driver_link.resolve().name
+                    except Exception:
+                        driver_name = ""
+                    # Unbind kernel DVB/radio drivers (leave usbfs alone unless resetting)
+                    if driver_name and driver_name != "usbfs":
+                        unbind_file = driver_link / "unbind"
+                        if unbind_file.exists():
+                            logger.info(
+                                "Unbinding kernel driver '%s' from RTL-SDR interface %s",
+                                driver_name,
+                                iface_dir.name,
+                            )
+                            try:
+                                unbind_file.write_text(iface_dir.name, encoding="utf-8")
+                            except Exception as exc:
+                                logger.warning("Failed to unbind %s: %s", iface_dir.name, exc)
+
+            # Optionally perform a USB port reset on /dev/bus/usb/<busnum>/<devnum>
+            if reset_usb:
+                busnum_file = dev_dir / "busnum"
+                devnum_file = dev_dir / "devnum"
+                if busnum_file.exists() and devnum_file.exists():
+                    busnum = int(busnum_file.read_text(encoding="utf-8").strip())
+                    devnum = int(devnum_file.read_text(encoding="utf-8").strip())
+                    dev_node = Path(f"/dev/bus/usb/{busnum:03d}/{devnum:03d}")
+                    if dev_node.exists():
+                        logger.info("Resetting RTL-SDR USB device node %s", dev_node)
+                        try:
+                            fd = os.open(str(dev_node), os.O_WRONLY)
+                            try:
+                                fcntl.ioctl(fd, USBDEVFS_RESET, 0)
+                            finally:
+                                os.close(fd)
+                            time.sleep(0.4)
+                        except Exception as exc:
+                            logger.warning("USBDEVFS_RESET failed on %s: %s", dev_node, exc)
+    except Exception as exc:
+        logger.debug("Error inspecting /sys/bus/usb/devices: %s", exc)
 
 
 class TunerManager:
@@ -50,6 +117,7 @@ class TunerManager:
         self._spawn_lock = threading.Lock()
         self._tune_lock = threading.Lock()
         self._spawning_nrsc5 = False
+        self._needs_usb_reset = False
 
         self._ffmpeg_proc: Optional[subprocess.Popen] = None
         self._nrsc5_proc: Optional[subprocess.Popen] = None
@@ -240,11 +308,15 @@ class TunerManager:
                 had_previous = self._terminate_nrsc5()
                 self._flush_pcm_queue()
                 if had_previous:
-                    # Allow Linux usbfs / librtlsdr to release the USB interface claim cleanly
-                    time.sleep(0.3)
+                    time.sleep(0.35)
 
                 if not self._running:
                     return
+
+                # Ensure kernel DVB drivers are unbound (and reset USB port if previous claim failed)
+                do_reset = self._needs_usb_reset
+                self._needs_usb_reset = False
+                prepare_rtlsdr_usb_device(reset_usb=do_reset)
 
                 with self._proc_lock:
                     self._nrsc5_generation += 1
@@ -256,6 +328,7 @@ class TunerManager:
                         logger.info("Spawning nrsc5 (gen %d): %s", gen, " ".join(cmd))
                         proc = subprocess.Popen(
                             cmd,
+                            stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
                             bufsize=0,
@@ -290,16 +363,30 @@ class TunerManager:
             proc = self._nrsc5_proc
             self._nrsc5_proc = None
         if proc is not None:
-            self._stop_process(proc, "nrsc5", use_sigint=True)
+            self._stop_process(proc, "nrsc5", is_nrsc5=True)
             return True
         return False
 
     @staticmethod
-    def _stop_process(proc: subprocess.Popen, name: str, use_sigint: bool = False) -> None:
+    def _stop_process(proc: subprocess.Popen, name: str, is_nrsc5: bool = False) -> None:
         if proc.poll() is not None:
             return
         try:
-            if use_sigint:
+            if is_nrsc5 and proc.stdin is not None:
+                # nrsc5 polls stdin for 'q' to exit its main loop and call rtlsdr_close() cleanly
+                try:
+                    proc.stdin.write(b"q\n")
+                    proc.stdin.flush()
+                    proc.stdin.close()
+                except Exception:
+                    pass
+                try:
+                    proc.wait(timeout=1.2)
+                    return
+                except subprocess.TimeoutExpired:
+                    pass
+
+            if is_nrsc5:
                 proc.send_signal(signal.SIGINT)
             else:
                 proc.terminate()
@@ -370,7 +457,11 @@ class TunerManager:
                 logger.info("[nrsc5] %s", line)
                 parse_nrsc5_line(line, self.store)
                 lower = line.lower()
-                if "no device found" in lower or "usb_open error" in lower or "failed to open rtlsdr" in lower:
+                if "usb_claim_interface error" in lower:
+                    # Schedule a USBDEVFS_RESET before the next spawn so the busy interface is cleared
+                    self._needs_usb_reset = True
+                    self.store.update(state="error", synced=False)
+                elif "no device found" in lower or "usb_open error" in lower or "failed to open rtlsdr" in lower:
                     self.store.update(state="error", synced=False)
         except Exception as exc:
             logger.debug("nrsc5 stderr reader ended: %s", exc)
