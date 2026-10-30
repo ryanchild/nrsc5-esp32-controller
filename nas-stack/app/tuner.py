@@ -76,7 +76,7 @@ class TunerManager:
             cmd.extend(["-d", dev_idx])
 
         # -o - -t raw outputs raw s16le 44.1kHz stereo PCM to stdout
-        cmd.extend(["-o", "-", "-t", "raw", f"{freq:.1f}", str(program)])
+        cmd.extend(["-o", "-", f"{freq:.1f}", str(program)])
         return cmd
 
     def build_ffmpeg_cmd(self) -> List[str]:
