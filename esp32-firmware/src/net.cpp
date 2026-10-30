@@ -131,7 +131,7 @@ bool NetClient::fetchNasStatus(RadioProgramData& outRadio) {
 bool NetClient::sendTune(float freq, int program, RadioProgramData& outRadio) {
     String url = String(NRSC5_API_BASE) + "/api/tune";
     char body[64];
-    snprintf(body, sizeof(body), "{"freq":%.1f,"program":%d}", freq, program);
+    snprintf(body, sizeof(body), "{\"freq\":%.1f,\"program\":%d}", freq, program);
 
     String resp;
     if (!httpRequest(url, "POST", String(body), resp, 2000)) {

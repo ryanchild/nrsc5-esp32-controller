@@ -19,11 +19,11 @@ public:
 private:
     struct ButtonTracker {
         uint8_t pin;
-        bool lastRawState = HIGH;
-        bool stableState = HIGH;
-        bool longPressFired = false;
-        unsigned long lastDebounceMs = 0;
-        unsigned long pressedAtMs = 0;
+        bool lastRawState;
+        bool stableState;
+        bool longPressFired;
+        unsigned long lastDebounceMs;
+        unsigned long pressedAtMs;
     };
 
     ButtonTracker _btnMenu;
