@@ -2,6 +2,7 @@ import logging
 import os
 import queue
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -46,7 +47,9 @@ class TunerManager:
 
         self._running = False
         self._proc_lock = threading.Lock()
+        self._spawn_lock = threading.Lock()
         self._tune_lock = threading.Lock()
+        self._spawning_nrsc5 = False
 
         self._ffmpeg_proc: Optional[subprocess.Popen] = None
         self._nrsc5_proc: Optional[subprocess.Popen] = None
@@ -75,7 +78,7 @@ class TunerManager:
         if dev_idx and dev_idx != "0":
             cmd.extend(["-d", dev_idx])
 
-        # -o - -t raw outputs raw s16le 44.1kHz stereo PCM to stdout
+        # -o - outputs WAV to stdout (strip_wav_header_if_present strips the 44-byte header)
         cmd.extend(["-o", "-", f"{freq:.1f}", str(program)])
         return cmd
 
@@ -123,13 +126,13 @@ class TunerManager:
             logger.info("TunerManager started with subprocesses disabled (test mode).")
             return
 
+        freq, program = self.store.get_freq_program()
+        self._spawn_nrsc5(freq, program)
+
         self._pacer_thread = threading.Thread(
             target=self._audio_pacer_loop, name="ffmpeg-audio-pacer", daemon=True
         )
         self._pacer_thread.start()
-
-        freq, program = self.store.get_freq_program()
-        self._spawn_nrsc5(freq, program)
 
     def stop(self) -> None:
         self._running = False
@@ -231,67 +234,87 @@ class TunerManager:
             self._stop_process(proc, "ffmpeg")
 
     def _spawn_nrsc5(self, freq: float, program: int) -> None:
-        self._terminate_nrsc5()
-        self._flush_pcm_queue()
-
-        with self._proc_lock:
-            self._nrsc5_generation += 1
-            gen = self._nrsc5_generation
-            self._tune_started_time = time.monotonic()
-
-            cmd = self.build_nrsc5_cmd(freq, program)
+        with self._spawn_lock:
+            self._spawning_nrsc5 = True
             try:
-                logger.info("Spawning nrsc5 (gen %d): %s", gen, " ".join(cmd))
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=0,
-                )
-                self._nrsc5_proc = proc
-            except FileNotFoundError:
-                logger.error("nrsc5 binary not found in PATH")
-                self.store.update(state="error", synced=False)
-                return
-            except Exception as exc:
-                logger.error("Failed to spawn nrsc5: %s", exc)
-                self.store.update(state="error", synced=False)
-                return
+                had_previous = self._terminate_nrsc5()
+                self._flush_pcm_queue()
+                if had_previous:
+                    # Allow Linux usbfs / librtlsdr to release the USB interface claim cleanly
+                    time.sleep(0.3)
 
-        threading.Thread(
-            target=self._read_nrsc5_stdout,
-            args=(proc, gen),
-            name=f"nrsc5-stdout-{gen}",
-            daemon=True,
-        ).start()
-        threading.Thread(
-            target=self._read_nrsc5_stderr,
-            args=(proc, gen),
-            name=f"nrsc5-stderr-{gen}",
-            daemon=True,
-        ).start()
+                if not self._running:
+                    return
 
-    def _terminate_nrsc5(self) -> None:
+                with self._proc_lock:
+                    self._nrsc5_generation += 1
+                    gen = self._nrsc5_generation
+                    self._tune_started_time = time.monotonic()
+
+                    cmd = self.build_nrsc5_cmd(freq, program)
+                    try:
+                        logger.info("Spawning nrsc5 (gen %d): %s", gen, " ".join(cmd))
+                        proc = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            bufsize=0,
+                        )
+                        self._nrsc5_proc = proc
+                    except FileNotFoundError:
+                        logger.error("nrsc5 binary not found in PATH")
+                        self.store.update(state="error", synced=False)
+                        return
+                    except Exception as exc:
+                        logger.error("Failed to spawn nrsc5: %s", exc)
+                        self.store.update(state="error", synced=False)
+                        return
+
+                threading.Thread(
+                    target=self._read_nrsc5_stdout,
+                    args=(proc, gen),
+                    name=f"nrsc5-stdout-{gen}",
+                    daemon=True,
+                ).start()
+                threading.Thread(
+                    target=self._read_nrsc5_stderr,
+                    args=(proc, gen),
+                    name=f"nrsc5-stderr-{gen}",
+                    daemon=True,
+                ).start()
+            finally:
+                self._spawning_nrsc5 = False
+
+    def _terminate_nrsc5(self) -> bool:
         with self._proc_lock:
             proc = self._nrsc5_proc
             self._nrsc5_proc = None
         if proc is not None:
-            self._stop_process(proc, "nrsc5")
+            self._stop_process(proc, "nrsc5", use_sigint=True)
+            return True
+        return False
 
     @staticmethod
-    def _stop_process(proc: subprocess.Popen, name: str) -> None:
+    def _stop_process(proc: subprocess.Popen, name: str, use_sigint: bool = False) -> None:
         if proc.poll() is not None:
             return
         try:
-            proc.terminate()
+            if use_sigint:
+                proc.send_signal(signal.SIGINT)
+            else:
+                proc.terminate()
             proc.wait(timeout=1.5)
         except subprocess.TimeoutExpired:
-            logger.warning("%s did not terminate within 1.5s; killing", name)
             try:
-                proc.kill()
+                proc.terminate()
                 proc.wait(timeout=1.0)
-            except Exception:
-                pass
+            except subprocess.TimeoutExpired:
+                logger.warning("%s did not terminate; killing", name)
+                try:
+                    proc.kill()
+                    proc.wait(timeout=1.0)
+                except Exception:
+                    pass
         except Exception as exc:
             logger.debug("Error stopping %s: %s", name, exc)
 
@@ -361,7 +384,7 @@ class TunerManager:
     def _audio_pacer_loop(self) -> None:
         """Continuously feed 20ms s16le chunks to ffmpeg at real-time pace."""
         next_tick = time.monotonic()
-        last_nrsc5_restart_attempt = 0.0
+        last_nrsc5_restart_attempt = time.monotonic()
 
         while self._running:
             now = time.monotonic()
@@ -396,14 +419,20 @@ class TunerManager:
                 self._terminate_ffmpeg()
                 next_tick = time.monotonic()
 
+            # Auto-restart nrsc5 only if it crashed and we aren't mid-tune/spawn
             if (
-                not self.is_nrsc5_running()
+                not self._spawning_nrsc5
                 and self._pending_target is None
-                and time.monotonic() - last_nrsc5_restart_attempt > 5.0
+                and not self.is_nrsc5_running()
+                and time.monotonic() - last_nrsc5_restart_attempt > 3.0
             ):
                 last_nrsc5_restart_attempt = time.monotonic()
                 freq, program = self.store.get_freq_program()
-                self._spawn_nrsc5(freq, program)
+                threading.Thread(
+                    target=self._spawn_nrsc5,
+                    args=(freq, program),
+                    daemon=True,
+                ).start()
 
     def is_nrsc5_running(self) -> bool:
         with self._proc_lock:
