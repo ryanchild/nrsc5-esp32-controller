@@ -52,11 +52,8 @@ static void syncPresetIndexFromRadio() {
 static void cycleStationPreset(int delta) {
     applyPresetToState(gState.presetIndex + delta);
 
-    // User requirement:
-    // Full refresh immediately when cycling stations so station frequency & subchannel
-    // display right away, then partial refresh when program data arrives a few seconds later.
     gNet.updateClock(gState);
-    gDisplay.renderFull(gState);
+    gDisplay.renderPartial(gState);
 
     gPendingTune     = true;
     gPendingTuneAtMs = millis();
@@ -148,17 +145,20 @@ void loop() {
         gLastStatusPollMs = millis();
     }
 
-    // 3. Check clock every second -> Full refresh once per minute when minute ticks over
+    // 3. Check clock every second -> Full refresh at top of the hour, partial refresh on other minutes
     if ((now - gLastClockCheckMs) >= 1000UL) {
         gLastClockCheckMs = now;
         gState.wifiConnected = gNet.ensureWiFi();
         if (gNet.updateClock(gState)) {
-            // Minute changed: full refresh to update clock and keep panel ghost-free
-            gDisplay.renderFull(gState);
+            if (gState.lastRenderedMinute == 0) {
+                gDisplay.renderFull(gState);
+            } else {
+                gDisplay.renderPartial(gState);
+            }
         }
     }
 
-    // 4. Poll NAS /api/status every 5 seconds -> Partial refresh if program data changed
+    // 4. Poll NAS /api/status every 5 seconds -> Partial refresh when program data changes
     if (!gPendingTune && (now - gLastStatusPollMs) >= STATUS_POLL_INTERVAL_MS) {
         gLastStatusPollMs = now;
         if (gState.wifiConnected) {
@@ -180,11 +180,13 @@ void loop() {
         }
     }
 
-    // 5. Refresh Open-Meteo weather every 15 minutes
+    // 5. Refresh Open-Meteo weather every 15 minutes -> Partial refresh
     if ((now - gLastWeatherPollMs) >= WEATHER_POLL_INTERVAL_MS) {
         gLastWeatherPollMs = now;
         if (gState.wifiConnected) {
-            gNet.fetchWeather(gState.weather);
+            if (gNet.fetchWeather(gState.weather)) {
+                gDisplay.renderPartial(gState);
+            }
         }
     }
 

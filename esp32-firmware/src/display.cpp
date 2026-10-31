@@ -71,7 +71,7 @@ void DisplayManager::drawDashboard(const AppState& state) {
     u8g2.print(freqStr);
     int16_t freqW = u8g2.getUTF8Width(freqStr);
 
-    // "FM" label + Inverted [HDx] Subchannel Badge next to frequency
+    // Inverted [HDx] Subchannel Badge next to frequency
     int16_t badgeX = freqX + freqW + 12;
     char hdLabel[12];
     snprintf(hdLabel, sizeof(hdLabel), "HD%d", state.radio.program + 1);
@@ -83,10 +83,13 @@ void DisplayManager::drawDashboard(const AppState& state) {
     int16_t badgeY  = 16;
 
     epd.fillRoundRect(badgeX, badgeY, badgeW, badgeH, 5, GxEPD_BLACK);
+    u8g2.setFontMode(1);
     u8g2.setForegroundColor(GxEPD_WHITE);
+    u8g2.setBackgroundColor(GxEPD_BLACK);
     u8g2.setCursor(badgeX + 9, badgeY + 21);
     u8g2.print(hdLabel);
     u8g2.setForegroundColor(GxEPD_BLACK);
+    u8g2.setBackgroundColor(GxEPD_WHITE);
 
     // Play / Pause pill badge in upper-left corner right side
     const char* playText = state.mediaPlaying ? "PLAYING" : "PAUSED";
@@ -98,10 +101,13 @@ void DisplayManager::drawDashboard(const AppState& state) {
         epd.fillRoundRect(playX, playY, playW, 24, 4, GxEPD_BLACK);
         // Play triangle
         epd.fillTriangle(playX + 8, playY + 6, playX + 8, playY + 17, playX + 16, playY + 11, GxEPD_WHITE);
+        u8g2.setFontMode(1);
         u8g2.setForegroundColor(GxEPD_WHITE);
+        u8g2.setBackgroundColor(GxEPD_BLACK);
         u8g2.setCursor(playX + 20, playY + 16);
         u8g2.print(playText);
         u8g2.setForegroundColor(GxEPD_BLACK);
+        u8g2.setBackgroundColor(GxEPD_WHITE);
     } else {
         epd.drawRoundRect(playX, playY, playW, 24, 4, GxEPD_BLACK);
         epd.fillRect(playX + 8, playY + 6, 3, 12, GxEPD_BLACK);
@@ -225,15 +231,13 @@ void DisplayManager::drawDashboard(const AppState& state) {
         } else if (state.radio.album.length() > 0) {
             secondaryLine = state.radio.album;
         }
-        if (state.radio.slogan.length() > 0) {
-            tertiaryLine = state.radio.slogan;
-        } else if (state.radio.genre.length() > 0) {
+        if (state.radio.genre.length() > 0 && !state.radio.genre.startsWith("HD")) {
             tertiaryLine = state.radio.genre;
         }
     } else if (state.radio.state == "tuning") {
         primaryLine = "Tuning " + String(freqStr) + " FM " + String(hdLabel) + "...";
         secondaryLine = "Waiting for HD Radio Program Service Data";
-    } else if (state.radio.slogan.length() > 0) {
+    } else if (state.radio.slogan.length() > 0 && !state.radio.slogan.startsWith("HD")) {
         primaryLine = state.radio.slogan;
         secondaryLine = state.radio.stationName.length() > 0 ? state.radio.stationName : state.radio.presetName;
     } else {
@@ -296,7 +300,7 @@ void DisplayManager::renderFull(const AppState& state) {
     do {
         drawDashboard(state);
     } while (epd.nextPage());
-    epd.hibernate();
+    epd.powerOff();
 }
 
 void DisplayManager::renderPartial(const AppState& state) {
@@ -305,5 +309,5 @@ void DisplayManager::renderPartial(const AppState& state) {
     do {
         drawDashboard(state);
     } while (epd.nextPage());
-    epd.hibernate();
+    epd.powerOff();
 }
