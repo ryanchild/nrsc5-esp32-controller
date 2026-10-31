@@ -221,7 +221,9 @@ class TunerManager:
         freq = round(float(freq), 1)
         program = int(program)
         self.store.reset_for_tune(freq, program)
+        self._last_audio_time = 0.0
         self._flush_pcm_queue()
+        self._terminate_ffmpeg()
 
         if not self.enable_processes:
             return
@@ -310,7 +312,9 @@ class TunerManager:
             self._spawning_nrsc5 = True
             try:
                 had_previous = self._terminate_nrsc5()
+                self._terminate_ffmpeg()
                 self._flush_pcm_queue()
+                self._last_audio_time = 0.0
                 if had_previous:
                     time.sleep(0.35)
 
@@ -476,6 +480,10 @@ class TunerManager:
                     self.store.update(state="error", synced=False)
                 elif "synced" in parsed and parsed["synced"] != prev_synced:
                     logger.info("[nrsc5] %s", line)
+                    if not parsed["synced"]:
+                        logger.info("Lost synchronization: stopping Icecast stream")
+                        self._terminate_ffmpeg()
+                        self._flush_pcm_queue()
                 elif "station_name" in parsed and parsed["station_name"] != prev_station:
                     logger.info("[nrsc5] %s", line)
                 elif "title" in parsed and parsed["title"] and parsed["title"] != prev_title:
@@ -494,9 +502,11 @@ class TunerManager:
                 logger.warning("nrsc5 process (gen %d) exited unexpectedly with code %s", gen, rc)
                 if self.store._state.state != "error":
                     self.store.update(state="no_signal", synced=False)
+                self._terminate_ffmpeg()
+                self._flush_pcm_queue()
 
     def _audio_pacer_loop(self) -> None:
-        """Continuously feed 20ms s16le chunks to ffmpeg at real-time pace."""
+        """Continuously feed 20ms s16le chunks to ffmpeg at real-time pace when synchronized."""
         next_tick = time.monotonic()
         last_nrsc5_restart_attempt = time.monotonic()
 
@@ -508,21 +518,53 @@ class TunerManager:
             if time.monotonic() - next_tick > 0.2:
                 next_tick = time.monotonic()
 
-            try:
-                chunk = self._pcm_queue.get_nowait()
-            except queue.Empty:
-                chunk = SILENCE_CHUNK
-                elapsed_since_tune = time.monotonic() - self._tune_started_time
+            is_synced = self.store._state.synced
+
+            # Audio dropout detection: if marked synced but no audio has arrived for > 1.8 seconds, drop sync
+            if is_synced and self._last_audio_time > 0 and (now - self._last_audio_time > 1.8):
+                logger.info("Audio dropout detected (>1.8s); marking sync lost and stopping stream")
+                self.store.update(synced=False, state="no_signal")
+                is_synced = False
+                self._terminate_ffmpeg()
+                self._flush_pcm_queue()
+
+            if not is_synced:
+                # Stop ffmpeg so Icecast drops the stream instead of streaming silence
+                if self.is_ffmpeg_running():
+                    self._terminate_ffmpeg()
+                    self._flush_pcm_queue()
+
+                elapsed_since_tune = now - self._tune_started_time
                 if (
                     self.store._state.state == "tuning"
-                    and not self.store._state.synced
                     and elapsed_since_tune > 12.0
                 ):
                     self.store.update(state="no_signal")
 
+                # Auto-restart nrsc5 only if it crashed and we aren't mid-tune/spawn
+                if (
+                    not self._spawning_nrsc5
+                    and self._pending_target is None
+                    and not self.is_nrsc5_running()
+                    and now - last_nrsc5_restart_attempt > 3.0
+                ):
+                    last_nrsc5_restart_attempt = now
+                    freq, program = self.store.get_freq_program()
+                    threading.Thread(
+                        target=self._spawn_nrsc5,
+                        args=(freq, program),
+                        daemon=True,
+                    ).start()
+                continue
+
+            try:
+                chunk = self._pcm_queue.get_nowait()
+            except queue.Empty:
+                chunk = SILENCE_CHUNK
+
             proc = self._ensure_ffmpeg_running()
             if proc is None or proc.stdin is None:
-                time.sleep(0.5)
+                time.sleep(0.1)
                 next_tick = time.monotonic()
                 continue
 
@@ -538,9 +580,9 @@ class TunerManager:
                 not self._spawning_nrsc5
                 and self._pending_target is None
                 and not self.is_nrsc5_running()
-                and time.monotonic() - last_nrsc5_restart_attempt > 3.0
+                and now - last_nrsc5_restart_attempt > 3.0
             ):
-                last_nrsc5_restart_attempt = time.monotonic()
+                last_nrsc5_restart_attempt = now
                 freq, program = self.store.get_freq_program()
                 threading.Thread(
                     target=self._spawn_nrsc5,
