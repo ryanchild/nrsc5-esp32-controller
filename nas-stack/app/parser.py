@@ -33,6 +33,45 @@ _AUDIO_PROG_RE = re.compile(
 _TYPE_FIELD_RE = re.compile(r"\btype:\s*([^,]+)", re.IGNORECASE)
 _NAME_FIELD_RE = re.compile(r"\bname:\s*([^,]+)", re.IGNORECASE)
 
+_PROMO_URL_RE = re.compile(
+    r"(?:https?://|www\.|\b[a-z0-9_.-]+\.(?:org|com|net|fm|edu|gov|io)\b)",
+    re.IGNORECASE,
+)
+
+_KNOWN_PROMO_PHRASES = {
+    "cpr classical",
+    "cpr news",
+    "colorado public radio",
+    "indie 102.3",
+    "krfc 88.9",
+    "krfc 88.9 fm",
+}
+
+
+def is_station_promo(text: str, store: Optional[StateStore] = None) -> bool:
+    """Detect if a title/artist string is a station promo, website, or callsign rather than a real track."""
+    t = text.strip().lower()
+    if not t:
+        return True
+    if _PROMO_URL_RE.search(t):
+        return True
+    if t in _KNOWN_PROMO_PHRASES:
+        return True
+    for p in _KNOWN_PROMO_PHRASES:
+        if t.startswith(f"{p} /") or t.startswith(f"{p} -") or t.startswith(f"{p} ·"):
+            return True
+    if store is not None:
+        callsign = store._state.callsign.lower().strip()
+        st_name = store._state.station_name.lower().strip()
+        slogan = store._state.slogan.lower().strip()
+        if callsign and (t == callsign or t == f"{callsign}-fm" or t == f"{callsign} fm"):
+            return True
+        if st_name and t == st_name:
+            return True
+        if slogan and t == slogan:
+            return True
+    return False
+
 
 def strip_log_prefix(line: str) -> str:
     """Strip timestamp and log level prefixes from an nrsc5 stderr line."""
@@ -81,6 +120,13 @@ def parse_nrsc5_line(line: str, store: Optional[StateStore] = None) -> Dict[str,
     m = _TITLE_RE.match(text)
     if m:
         val = m.group(1).strip()
+        if is_station_promo(val, store):
+            # Save to slogan if empty for display, but never overwrite a real song title
+            if store is not None and not store._state.slogan:
+                store.update(slogan=val)
+            parsed["station_promo"] = val
+            return parsed
+
         parsed["title"] = val
         if store is not None:
             store.update(title=val, state="playing", synced=True)
@@ -89,6 +135,10 @@ def parse_nrsc5_line(line: str, store: Optional[StateStore] = None) -> Dict[str,
     m = _ARTIST_RE.match(text)
     if m:
         val = m.group(1).strip()
+        if is_station_promo(val, store):
+            parsed["station_promo"] = val
+            return parsed
+
         parsed["artist"] = val
         if store is not None:
             store.update(artist=val)

@@ -127,3 +127,34 @@ def test_cpr_enricher_formatting() -> None:
     assert build_cpr_performer("", "Colorado Symphony", "Brett Mitchell") == "Colorado Symphony, Brett Mitchell, cond."
     assert build_cpr_performer("Yo-Yo Ma (cello)", "", "") == "Yo-Yo Ma (cello)"
 
+
+def test_station_promo_title_filtering(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    # Set an initial real track title
+    parse_nrsc5_line("Title: Symphony No. 5 in C Minor, Op. 67", store)
+    parse_nrsc5_line("Artist: Ludwig van Beethoven", store)
+    assert store.snapshot()["title"] == "Symphony No. 5 in C Minor, Op. 67"
+    assert store.snapshot()["artist"] == "Ludwig van Beethoven"
+
+    # nrsc5 sends periodic station promo / website lines
+    res1 = parse_nrsc5_line("Title: CPR Classical / cprclassical.org", store)
+    assert "title" not in res1
+    assert "station_promo" in res1
+    # Real piece title must NOT have been overwritten
+    assert store.snapshot()["title"] == "Symphony No. 5 in C Minor, Op. 67"
+
+    # More promo variations
+    parse_nrsc5_line("Title: cprclassical.org", store)
+    assert store.snapshot()["title"] == "Symphony No. 5 in C Minor, Op. 67"
+
+    parse_nrsc5_line("Title: CPR Classical", store)
+    assert store.snapshot()["title"] == "Symphony No. 5 in C Minor, Op. 67"
+
+    parse_nrsc5_line("Artist: CPR Classical / cprclassical.org", store)
+    assert store.snapshot()["artist"] == "Ludwig van Beethoven"
+
+    # When a new real piece arrives, title updates normally
+    parse_nrsc5_line("Title: Violin Concerto in D Major, Op. 35", store)
+    assert store.snapshot()["title"] == "Violin Concerto in D Major, Op. 35"
+
+

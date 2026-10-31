@@ -95,7 +95,7 @@ class MetadataEnricher:
                 # If over-the-air artist is blank or matches composer, ensure composer is set
                 if not store._state.artist or store._state.artist == composer:
                     updates["artist"] = composer
-            if title and not store._state.title:
+            if title and store._state.title != title:
                 updates["title"] = title
             if album and (not store._state.album or store._state.album != album):
                 updates["album"] = album
