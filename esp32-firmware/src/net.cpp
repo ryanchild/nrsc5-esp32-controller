@@ -105,6 +105,12 @@ static void parseStatusJson(const String& payload, RadioProgramData& outRadio) {
     outRadio.artist      = doc["artist"] | "";
     outRadio.album       = doc["album"] | "";
     outRadio.genre       = doc["genre"] | "";
+    outRadio.composer    = doc["composer"] | "";
+    outRadio.conductor   = doc["conductor"] | "";
+    outRadio.orchestra   = doc["orchestra"] | "";
+    outRadio.soloists    = doc["soloists"] | "";
+    outRadio.performer   = doc["performer"] | "";
+    outRadio.show        = doc["show"] | "";
     outRadio.synced      = doc["synced"] | false;
 
     if (!doc["mer_db"].isNull()) {

@@ -36,6 +36,12 @@ class TunerState:
     artist: str = ""
     album: str = ""
     genre: str = ""
+    composer: str = ""
+    conductor: str = ""
+    orchestra: str = ""
+    soloists: str = ""
+    performer: str = ""
+    show: str = ""
     programs: Dict[int, ProgramInfo] = field(default_factory=dict)
     mer_db: Optional[float] = None
     ber: Optional[float] = None
@@ -123,6 +129,12 @@ class StateStore:
             self._state.artist = ""
             self._state.album = ""
             self._state.genre = ""
+            self._state.composer = ""
+            self._state.conductor = ""
+            self._state.orchestra = ""
+            self._state.soloists = ""
+            self._state.performer = ""
+            self._state.show = ""
             if freq_changed:
                 self._state.station_name = ""
                 self._state.callsign = ""
@@ -195,6 +207,12 @@ class StateStore:
                 "artist": self._state.artist,
                 "album": self._state.album,
                 "genre": self._state.genre,
+                "composer": self._state.composer,
+                "conductor": self._state.conductor,
+                "orchestra": self._state.orchestra,
+                "soloists": self._state.soloists,
+                "performer": self._state.performer,
+                "show": self._state.show,
                 "programs": programs_list,
                 "mer_db": self._state.mer_db,
                 "ber": self._state.ber,

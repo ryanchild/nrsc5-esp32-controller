@@ -13,6 +13,12 @@ struct RadioProgramData {
     String artist = "";
     String album = "";
     String genre = "";
+    String composer = "";
+    String conductor = "";
+    String orchestra = "";
+    String soloists = "";
+    String performer = "";
+    String show = "";
     float merDb = 0.0f;
     bool hasMer = false;
     bool synced = false;
@@ -28,6 +34,12 @@ struct RadioProgramData {
                title != other.title ||
                artist != other.artist ||
                album != other.album ||
+               composer != other.composer ||
+               conductor != other.conductor ||
+               orchestra != other.orchestra ||
+               soloists != other.soloists ||
+               performer != other.performer ||
+               show != other.show ||
                synced != other.synced ||
                nasOnline != other.nasOnline;
     }

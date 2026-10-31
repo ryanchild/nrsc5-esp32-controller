@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+from app.enricher import MetadataEnricher
 from app.parser import parse_nrsc5_line
 from app.state import StateStore
 
@@ -131,6 +132,7 @@ class TunerManager:
         self._pacer_thread: Optional[threading.Thread] = None
         self._last_audio_time: float = 0.0
         self._tune_started_time: float = time.monotonic()
+        self.enricher = MetadataEnricher()
 
     def build_nrsc5_cmd(self, freq: float, program: int) -> List[str]:
         cmd = ["nrsc5"]
@@ -196,6 +198,7 @@ class TunerManager:
 
         freq, program = self.store.get_freq_program()
         self._spawn_nrsc5(freq, program)
+        self.enricher.maybe_enrich(self.store)
 
         self._pacer_thread = threading.Thread(
             target=self._audio_pacer_loop, name="ffmpeg-audio-pacer", daemon=True
@@ -245,6 +248,7 @@ class TunerManager:
             return
         freq, program = target
         self._spawn_nrsc5(freq, program)
+        self.enricher.maybe_enrich(self.store)
 
     def _flush_pcm_queue(self) -> None:
         while True:
@@ -476,8 +480,10 @@ class TunerManager:
                     logger.info("[nrsc5] %s", line)
                 elif "title" in parsed and parsed["title"] and parsed["title"] != prev_title:
                     logger.info("[nrsc5] Now Playing: %s", parsed["title"])
+                    self.enricher.maybe_enrich(self.store)
                 elif "artist" in parsed and parsed["artist"] and parsed["artist"] != prev_artist:
                     logger.info("[nrsc5] Artist: %s", parsed["artist"])
+                    self.enricher.maybe_enrich(self.store)
                 else:
                     logger.debug("[nrsc5] %s", line)
         except Exception as exc:

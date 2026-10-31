@@ -211,8 +211,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         document.getElementById('station-name').textContent = data.station_name || data.callsign || '';
         document.getElementById('slogan').textContent = data.slogan || '';
         document.getElementById('title').textContent = data.title || 'No Title PSD';
-        const parts = [data.artist, data.album].filter(Boolean);
-        document.getElementById('artist-album').textContent = parts.length ? parts.join(' — ') : 'No Artist PSD';
+        const artistName = data.composer || data.artist || '';
+        const parts = [artistName, data.performer, data.album].filter(Boolean);
+        document.getElementById('artist-album').textContent = parts.length ? parts.join('  ·  ') : 'No Artist PSD';
         document.getElementById('synced').textContent = data.synced ? 'Locked' : 'Unlocked';
         document.getElementById('mer').textContent = data.mer_db !== null ? data.mer_db + ' dB' : '--';
         document.getElementById('ber').textContent = data.ber !== null ? data.ber : '--';

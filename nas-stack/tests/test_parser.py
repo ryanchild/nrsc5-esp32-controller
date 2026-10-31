@@ -105,6 +105,9 @@ def test_retune_clears_psd(tmp_path: Path) -> None:
     assert snap["title"] == ""
     assert snap["artist"] == ""
     assert snap["album"] == ""
+    assert snap["composer"] == ""
+    assert snap["performer"] == ""
+    assert snap["show"] == ""
     assert snap["station_name"] == "KEXP-FM"
 
     store.reset_for_tune(94.9, 0)
@@ -113,3 +116,14 @@ def test_retune_clears_psd(tmp_path: Path) -> None:
     assert snap2["program"] == 0
     assert snap2["station_name"] == ""
     assert snap2["synced"] is False
+
+
+def test_cpr_enricher_formatting() -> None:
+    from app.enricher import build_cpr_performer
+    assert (
+        build_cpr_performer("Itzhak Perlman (violin)", "Boston Symphony Orchestra", "Seiji Ozawa")
+        == "Itzhak Perlman (violin)  ·  Boston Symphony Orchestra, Seiji Ozawa, cond."
+    )
+    assert build_cpr_performer("", "Colorado Symphony", "Brett Mitchell") == "Colorado Symphony, Brett Mitchell, cond."
+    assert build_cpr_performer("Yo-Yo Ma (cello)", "", "") == "Yo-Yo Ma (cello)"
+
