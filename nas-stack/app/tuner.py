@@ -116,7 +116,7 @@ class TunerManager:
         self._running = False
         self._proc_lock = threading.Lock()
         self._spawn_lock = threading.Lock()
-        self._tune_lock = threading.Lock()
+        self._tune_lock = threading.RLock()
         self._spawning_nrsc5 = False
         self._needs_usb_reset = False
 
@@ -221,9 +221,6 @@ class TunerManager:
         freq = round(float(freq), 1)
         program = int(program)
         self.store.reset_for_tune(freq, program)
-        self._last_audio_time = 0.0
-        self._flush_pcm_queue()
-        self._terminate_ffmpeg()
 
         if not self.enable_processes:
             return
@@ -232,14 +229,16 @@ class TunerManager:
             self._pending_target = (freq, program)
             if self._debounce_timer is not None:
                 self._debounce_timer.cancel()
-            if self.debounce_sec <= 0:
-                self._execute_pending_tune()
-            else:
+            should_execute = self.debounce_sec <= 0
+            if not should_execute:
                 self._debounce_timer = threading.Timer(
                     self.debounce_sec, self._execute_pending_tune
                 )
                 self._debounce_timer.daemon = True
                 self._debounce_timer.start()
+
+        if should_execute:
+            self._execute_pending_tune()
 
     def _execute_pending_tune(self) -> None:
         with self._tune_lock:
@@ -249,6 +248,9 @@ class TunerManager:
         if target is None or not self._running:
             return
         freq, program = target
+        self._last_audio_time = 0.0
+        self._flush_pcm_queue()
+        self._terminate_ffmpeg()
         self._spawn_nrsc5(freq, program)
         self.enricher.maybe_enrich(self.store)
 

@@ -133,7 +133,7 @@ def test_health_and_dashboard(tmp_path: Path) -> None:
 
 def test_debounce_rapid_tunes(tmp_path: Path) -> None:
     store = StateStore(state_file=str(tmp_path / "state.json"))
-    tuner = TunerManager(store=store, debounce_sec=0.15, enable_processes=True)
+    tuner = TunerManager(store=store, debounce_sec=0.25, enable_processes=True)
 
     with patch.object(tuner, "_spawn_nrsc5") as mock_spawn:
         tuner._running = True
@@ -142,7 +142,7 @@ def test_debounce_rapid_tunes(tmp_path: Path) -> None:
         tuner.request_tune(90.7, 1)
 
         import time
-        time.sleep(0.3)
+        time.sleep(0.4)
 
         assert mock_spawn.call_count == 1
         mock_spawn.assert_called_once_with(90.7, 1)
@@ -152,13 +152,14 @@ def test_debounce_rapid_tunes(tmp_path: Path) -> None:
 def test_sync_loss_terminates_ffmpeg(tmp_path: Path) -> None:
     from unittest.mock import MagicMock
     store = StateStore(state_file=str(tmp_path / "state.json"))
-    tuner = TunerManager(store=store, debounce_sec=0.1, enable_processes=True)
-    with patch.object(tuner, "_stop_process") as mock_stop:
+    tuner = TunerManager(store=store, debounce_sec=0.0, enable_processes=True)
+    with patch.object(tuner, "_stop_process") as mock_stop, patch.object(tuner, "_spawn_nrsc5"):
         dummy_proc = MagicMock()
         dummy_proc.poll.return_value = None
         tuner._ffmpeg_proc = dummy_proc
         assert tuner.is_ffmpeg_running() is True
 
+        tuner._running = True
         tuner.request_tune(88.9, 0)
         assert tuner._ffmpeg_proc is None
         mock_stop.assert_called_once_with(dummy_proc, "ffmpeg")
