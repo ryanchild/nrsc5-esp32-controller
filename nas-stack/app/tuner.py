@@ -509,6 +509,7 @@ class TunerManager:
         """Continuously feed 20ms s16le chunks to ffmpeg at real-time pace when synchronized."""
         next_tick = time.monotonic()
         last_nrsc5_restart_attempt = time.monotonic()
+        last_enrich_poll = time.monotonic()
 
         while self._running:
             now = time.monotonic()
@@ -517,6 +518,11 @@ class TunerManager:
             next_tick += CHUNK_DURATION_SEC
             if time.monotonic() - next_tick > 0.2:
                 next_tick = time.monotonic()
+
+            # Periodically poll enhanced metadata (e.g. CPR Classical playlist) every 30s
+            if now - last_enrich_poll > 30.0:
+                last_enrich_poll = now
+                self.enricher.maybe_enrich(self.store)
 
             is_synced = self.store._state.synced
 

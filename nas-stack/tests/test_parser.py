@@ -157,4 +157,11 @@ def test_station_promo_title_filtering(tmp_path: Path) -> None:
     parse_nrsc5_line("Title: Violin Concerto in D Major, Op. 35", store)
     assert store.snapshot()["title"] == "Violin Concerto in D Major, Op. 35"
 
+    # When enhanced classical metadata is present (composer is set),
+    # over-the-air PSD cannot overwrite the enhanced database title
+    store.update(composer="Pyotr Ilyich Tchaikovsky", title="Swan Lake, Op. 20: Act II")
+    parse_nrsc5_line("Title: Swan Lake (Excerpts)", store)
+    assert store.snapshot()["title"] == "Swan Lake, Op. 20: Act II"
+
+
 

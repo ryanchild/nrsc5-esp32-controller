@@ -127,6 +127,11 @@ def parse_nrsc5_line(line: str, store: Optional[StateStore] = None) -> Dict[str,
             parsed["station_promo"] = val
             return parsed
 
+        # If enhanced classical metadata is active, keep the enhanced database title
+        if store is not None and store._state.composer and store._state.title:
+            parsed["ota_title"] = val
+            return parsed
+
         parsed["title"] = val
         if store is not None:
             store.update(title=val, state="playing", synced=True)
@@ -137,6 +142,11 @@ def parse_nrsc5_line(line: str, store: Optional[StateStore] = None) -> Dict[str,
         val = m.group(1).strip()
         if is_station_promo(val, store):
             parsed["station_promo"] = val
+            return parsed
+
+        # If enhanced composer is active, do not overwrite with over-the-air artist
+        if store is not None and store._state.composer:
+            parsed["ota_artist"] = val
             return parsed
 
         parsed["artist"] = val
