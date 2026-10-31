@@ -145,6 +145,7 @@ void DisplayManager::drawDashboard(const AppState& state) {
     // ZONE 2: UPPER RIGHT (x: 427..791, y: 0..87) — Clock + Weather
     // ========================================================================
     int16_t rightX = TOP_SPLIT_X + 16;
+    int16_t rightMargin = SCREEN_W - 16;
 
     // Row 1: Large Clock (e.g. 14:20 or 2:20 PM)
     u8g2.setFont(u8g2_font_logisoso38_tn);
@@ -158,38 +159,48 @@ void DisplayManager::drawDashboard(const AppState& state) {
         u8g2.print(state.clockAmPmStr);
     }
 
-    // Date string aligned right on top row (city label dropped)
+    // Date string pushed all the way to the upper right corner
     u8g2.setFont(u8g2_font_helvB14_tr);
     int16_t dateW = u8g2.getUTF8Width(state.clockDateStr.c_str());
-    u8g2.setCursor(SCREEN_W - dateW - 16, 42);
+    u8g2.setCursor(rightMargin - dateW, 26);
     u8g2.print(state.clockDateStr);
 
     // Row 2: Weather (Icon, Current Temp, High/Low, Rain Probability)
     if (state.weather.valid) {
-        Icons::drawWeatherIcon(epd, rightX, 49, state.weather.weatherCode, GxEPD_BLACK);
+        Icons::drawWeatherIcon(epd, rightX, 48, state.weather.weatherCode, GxEPD_BLACK);
 
         char tempNow[16];
         const char* unitChar = WEATHER_UNITS_F ? "F" : "C";
         snprintf(tempNow, sizeof(tempNow), "%.0f°%s", state.weather.currentTemp, unitChar);
 
         u8g2.setFont(u8g2_font_helvB18_tr);
-        u8g2.setCursor(rightX + 44, 76);
+        u8g2.setCursor(rightX + 42, 75);
         u8g2.print(tempNow);
         int16_t tempW = u8g2.getUTF8Width(tempNow);
+        int16_t tempRight = rightX + 42 + tempW;
 
-        char hiLoBuf[32];
-        snprintf(hiLoBuf, sizeof(hiLoBuf), "H:%.0f° L:%.0f°", state.weather.highTemp, state.weather.lowTemp);
-        u8g2.setFont(u8g2_font_helvB14_tr);
-        int16_t hiLoX = rightX + 44 + tempW + 16;
-        u8g2.setCursor(hiLoX, 76);
-        u8g2.print(hiLoBuf);
-        int16_t hiLoW = u8g2.getUTF8Width(hiLoBuf);
-
+        // Precipitation right-aligned with the date above
         char rainBuf[24];
         snprintf(rainBuf, sizeof(rainBuf), "Rain %d%%", state.weather.precipProb);
-        int16_t rainX = hiLoX + hiLoW + 16;
-        u8g2.setCursor(rainX, 76);
+        u8g2.setFont(u8g2_font_helvB18_tr);
+        int16_t rainW = u8g2.getUTF8Width(rainBuf);
+        int16_t rainX = rightMargin - rainW;
+        u8g2.setCursor(rainX, 75);
         u8g2.print(rainBuf);
+
+        // High / Low temp: same font/size as temperature (helvB18_tr), centered between temp and rain
+        char hiLoBuf[32];
+        snprintf(hiLoBuf, sizeof(hiLoBuf), "H:%.0f° L:%.0f°", state.weather.highTemp, state.weather.lowTemp);
+        int16_t hiLoW = u8g2.getUTF8Width(hiLoBuf);
+        int16_t availableSpace = rainX - tempRight;
+        int16_t hiLoX;
+        if (availableSpace > hiLoW) {
+            hiLoX = tempRight + ((availableSpace - hiLoW) / 2);
+        } else {
+            hiLoX = tempRight + 8;
+        }
+        u8g2.setCursor(hiLoX, 75);
+        u8g2.print(hiLoBuf);
     } else {
         u8g2.setFont(u8g2_font_helvR12_tr);
         u8g2.setCursor(rightX, 74);
