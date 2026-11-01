@@ -231,5 +231,44 @@ def test_cpr_enricher_clears_stale_orchestra_and_conductor(tmp_path: Path) -> No
     assert snap2["performer"] == "Yo-Yo Ma, cello"
 
 
+def test_direct_audio_streaming_preserves_frames_and_alignment(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+    from app.tuner import TunerManager
+
+    store = StateStore(state_file=str(tmp_path / "state.json"))
+    store.update(state="tuning", synced=False)
+    tuner = TunerManager(store=store, debounce_sec=0.0, enable_processes=False)
+    tuner._running = True
+
+    # Construct mock proc
+    mock_proc = MagicMock()
+    mock_proc.poll.return_value = None
+
+    # Chunk 1: 44-byte RIFF header + 5 bytes of PCM
+    chunk1 = b"RIFF\x24\x00\x00\x00WAVE" + (b"\x00" * 32) + b"\x01\x02\x03\x04\x05"
+    # Chunk 2: 3 bytes of PCM -> completes the partial frame (5 + 3 = 8 bytes = two 4-byte frames)
+    chunk2 = b"\x06\x07\x08"
+    mock_proc.stdout.read.side_effect = [chunk1, chunk2, b""]
+
+    written_chunks = []
+    tuner._write_pcm_to_ffmpeg = lambda data: written_chunks.append(data)
+
+    tuner._read_nrsc5_stdout(mock_proc, gen=0)
+
+    # First call had 5 PCM bytes -> stripped header -> sent 4 bytes, kept 1 byte
+    # Second call had 3 PCM bytes -> combined with 1 leftover = 4 bytes -> sent 4 bytes
+    assert len(written_chunks) == 2
+    assert written_chunks[0] == b"\x01\x02\x03\x04"
+    assert written_chunks[1] == b"\x05\x06\x07\x08"
+    assert sum(len(c) for c in written_chunks) == 8
+    assert all(len(c) % 4 == 0 for c in written_chunks)
+
+    # State updated to playing and synced
+    assert store._state.state == "playing"
+    assert store._state.synced is True
+    assert tuner._last_audio_time > 0.0
+
+
+
 
 
