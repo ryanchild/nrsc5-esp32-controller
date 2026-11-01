@@ -488,11 +488,15 @@ class TunerManager:
                         self._flush_pcm_queue()
                 elif "station_name" in parsed and parsed["station_name"] != prev_station:
                     logger.info("[nrsc5] %s", line)
-                elif "title" in parsed and parsed["title"] and parsed["title"] != prev_title:
-                    logger.info("[nrsc5] Now Playing: %s", parsed["title"])
+                elif ("title" in parsed and parsed["title"] and parsed["title"] != prev_title) or (
+                    "ota_title" in parsed and parsed["ota_title"] and parsed["ota_title"] != prev_title
+                ):
+                    logger.info("[nrsc5] Now Playing: %s", parsed.get("title") or parsed.get("ota_title"))
                     self.enricher.maybe_enrich(self.store)
-                elif "artist" in parsed and parsed["artist"] and parsed["artist"] != prev_artist:
-                    logger.info("[nrsc5] Artist: %s", parsed["artist"])
+                elif ("artist" in parsed and parsed["artist"] and parsed["artist"] != prev_artist) or (
+                    "ota_artist" in parsed and parsed["ota_artist"] and parsed["ota_artist"] != prev_artist
+                ):
+                    logger.info("[nrsc5] Artist: %s", parsed.get("artist") or parsed.get("ota_artist"))
                     self.enricher.maybe_enrich(self.store)
                 else:
                     logger.debug("[nrsc5] %s", line)

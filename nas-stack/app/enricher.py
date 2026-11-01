@@ -62,7 +62,13 @@ class MetadataEnricher:
                 return
             self._last_query_time = now
 
-        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        try:
+            from zoneinfo import ZoneInfo
+
+            today_str = datetime.datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d")
+        except Exception:
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+
         b64_date = base64.b64encode(today_str.encode("utf-8")).decode("utf-8")
         url = f"https://playlist.cprnetwork.org/api/playlistCL/selectData:{b64_date}"
 
@@ -89,35 +95,29 @@ class MetadataEnricher:
 
             performer = build_cpr_performer(soloists, orchestra, conductor)
 
-            updates: Dict[str, Any] = {}
+            # Explicitly set or clear all track-specific fields so previous piece data doesn't persist
+            updates: Dict[str, Any] = {
+                "composer": composer,
+                "title": title or store._state.title,
+                "album": album,
+                "conductor": conductor,
+                "orchestra": orchestra,
+                "soloists": soloists,
+                "performer": performer,
+                "show": show,
+            }
             if composer:
-                updates["composer"] = composer
-                # If over-the-air artist is blank or matches composer, ensure composer is set
-                if not store._state.artist or store._state.artist == composer:
-                    updates["artist"] = composer
-            if title and store._state.title != title:
-                updates["title"] = title
-            if album and (not store._state.album or store._state.album != album):
-                updates["album"] = album
-            if conductor:
-                updates["conductor"] = conductor
-            if orchestra:
-                updates["orchestra"] = orchestra
-            if soloists:
-                updates["soloists"] = soloists
-            if performer:
-                updates["performer"] = performer
-            if show:
-                updates["show"] = show
+                updates["artist"] = composer
+            elif performer:
+                updates["artist"] = performer
 
-            if updates:
-                logger.info(
-                    "[enricher] Enriched KVOD: %s - %s (%s)",
-                    composer,
-                    title,
-                    performer or "no performer",
-                )
-                store.update(**updates)
+            logger.info(
+                "[enricher] Enriched KVOD: %s - %s (%s)",
+                composer,
+                title,
+                performer or "no performer",
+            )
+            store.update(**updates)
         except Exception as exc:
             logger.debug("CPR Classical enrichment failed: %s", exc)
 
@@ -128,7 +128,13 @@ class MetadataEnricher:
                 return
             self._last_query_time = now
 
-        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        try:
+            from zoneinfo import ZoneInfo
+
+            today_str = datetime.datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d")
+        except Exception:
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+
         b64_date = base64.b64encode(today_str.encode("utf-8")).decode("utf-8")
         url = f"https://playlist.cprnetwork.org/api/playlistCO/selectData:{b64_date}"
 

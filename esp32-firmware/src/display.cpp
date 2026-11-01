@@ -235,7 +235,7 @@ void DisplayManager::drawDashboard(const AppState& state) {
                 ensembleLine = state.radio.orchestra;
             } else if (state.radio.conductor.length() > 0) {
                 ensembleLine = state.radio.conductor + ", cond.";
-            } else if (state.radio.performer.length() > 0) {
+            } else if (state.radio.performer.length() > 0 && state.radio.performer != state.radio.soloists) {
                 ensembleLine = state.radio.performer;
             }
 

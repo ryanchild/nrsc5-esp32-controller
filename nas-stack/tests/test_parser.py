@@ -164,4 +164,72 @@ def test_station_promo_title_filtering(tmp_path: Path) -> None:
     assert store.snapshot()["title"] == "Swan Lake, Op. 20: Act II"
 
 
+def test_cpr_enricher_clears_stale_orchestra_and_conductor(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock, patch
+    from app.enricher import MetadataEnricher
+    import json
+
+    store = make_store(tmp_path)
+    store.update(freq=90.1, program=1)
+    enricher = MetadataEnricher()
+
+    data_orchestral = [
+        {
+            "composer": "Ludwig van Beethoven",
+            "title": "Minuet in G WoO 10/2",
+            "album": "Boccherini / Tchaikovsky Chamber Orchestra",
+            "orchestra": "Philadelphia Orchestra",
+            "conductor": "Eugene Ormandy",
+            "soloists": "",
+            "line_2": "",
+        }
+    ]
+
+    mock_resp1 = MagicMock()
+    mock_resp1.read.return_value = json.dumps(data_orchestral).encode("utf-8")
+    mock_resp1.__enter__.return_value = mock_resp1
+
+    with patch("urllib.request.urlopen", return_value=mock_resp1):
+        enricher._enrich_cpr_classical(store)
+
+    snap1 = store.snapshot()
+    assert snap1["composer"] == "Ludwig van Beethoven"
+    assert snap1["title"] == "Minuet in G WoO 10/2"
+    assert snap1["orchestra"] == "Philadelphia Orchestra"
+    assert snap1["conductor"] == "Eugene Ormandy"
+
+    # Now simulate the next track: Yo-Yo Ma solo cello
+    data_solo = [
+        {
+            "composer": "Johann Sebastian Bach",
+            "title": "Cello Suite #1 in G BWV 1007",
+            "album": "Six Evolutions - Bach: Cello Suites",
+            "orchestra": "",
+            "conductor": "",
+            "soloists": "Yo-Yo Ma, cello",
+            "line_2": "",
+        }
+    ]
+
+    mock_resp2 = MagicMock()
+    mock_resp2.read.return_value = json.dumps(data_solo).encode("utf-8")
+    mock_resp2.__enter__.return_value = mock_resp2
+
+    # Allow debounced query
+    enricher._last_query_time = 0.0
+    with patch("urllib.request.urlopen", return_value=mock_resp2):
+        enricher._enrich_cpr_classical(store)
+
+    snap2 = store.snapshot()
+    assert snap2["composer"] == "Johann Sebastian Bach"
+    assert snap2["title"] == "Cello Suite #1 in G BWV 1007"
+    assert snap2["album"] == "Six Evolutions - Bach: Cello Suites"
+    assert snap2["soloists"] == "Yo-Yo Ma, cello"
+    # Stale orchestra and conductor from Beethoven MUST be cleared!
+    assert snap2["orchestra"] == ""
+    assert snap2["conductor"] == ""
+    assert snap2["performer"] == "Yo-Yo Ma, cello"
+
+
+
 
