@@ -269,6 +269,76 @@ def test_direct_audio_streaming_preserves_frames_and_alignment(tmp_path: Path) -
     assert tuner._last_audio_time > 0.0
 
 
+def test_build_ffmpeg_cmd_aac_default(tmp_path: Path) -> None:
+    import os
+    from app.tuner import TunerManager
+
+    store = StateStore(state_file=str(tmp_path / "state.json"))
+    tuner = TunerManager(store=store, enable_processes=False)
+
+    old_codec = os.environ.pop("AUDIO_CODEC", None)
+    old_bitrate = os.environ.pop("AUDIO_BITRATE", None)
+    old_mp3 = os.environ.pop("MP3_BITRATE", None)
+    try:
+        cmd = tuner.build_ffmpeg_cmd()
+        assert "-c:a" in cmd
+        codec_idx = cmd.index("-c:a")
+        assert cmd[codec_idx + 1] == "aac"
+
+        bitrate_idx = cmd.index("-b:a")
+        assert cmd[bitrate_idx + 1] == "320k"
+
+        ct_idx = cmd.index("-content_type")
+        assert cmd[ct_idx + 1] == "audio/aac"
+
+        f_idx = cmd.index("-f", 8)  # output muxer flag
+        assert cmd[f_idx + 1] == "adts"
+    finally:
+        if old_codec is not None:
+            os.environ["AUDIO_CODEC"] = old_codec
+        if old_bitrate is not None:
+            os.environ["AUDIO_BITRATE"] = old_bitrate
+        if old_mp3 is not None:
+            os.environ["MP3_BITRATE"] = old_mp3
+
+
+def test_build_ffmpeg_cmd_mp3_override(tmp_path: Path) -> None:
+    import os
+    from app.tuner import TunerManager
+
+    store = StateStore(state_file=str(tmp_path / "state.json"))
+    tuner = TunerManager(store=store, enable_processes=False)
+
+    old_codec = os.environ.get("AUDIO_CODEC")
+    old_bitrate = os.environ.get("AUDIO_BITRATE")
+    try:
+        os.environ["AUDIO_CODEC"] = "mp3"
+        os.environ["AUDIO_BITRATE"] = "256k"
+        cmd = tuner.build_ffmpeg_cmd()
+
+        codec_idx = cmd.index("-c:a")
+        assert cmd[codec_idx + 1] == "libmp3lame"
+
+        bitrate_idx = cmd.index("-b:a")
+        assert cmd[bitrate_idx + 1] == "256k"
+
+        ct_idx = cmd.index("-content_type")
+        assert cmd[ct_idx + 1] == "audio/mpeg"
+
+        f_idx = cmd.index("-f", 8)
+        assert cmd[f_idx + 1] == "mp3"
+    finally:
+        if old_codec is not None:
+            os.environ["AUDIO_CODEC"] = old_codec
+        else:
+            os.environ.pop("AUDIO_CODEC", None)
+        if old_bitrate is not None:
+            os.environ["AUDIO_BITRATE"] = old_bitrate
+        else:
+            os.environ.pop("AUDIO_BITRATE", None)
+
+
+
 
 
 

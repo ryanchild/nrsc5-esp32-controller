@@ -164,3 +164,7 @@ esp32-firmware/include/config.h
 
 # --- macOS ---
 .DS_Store
+
+# --- Local audio recordings ---
+*.wav
+*.mp3

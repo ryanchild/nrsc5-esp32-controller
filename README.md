@@ -4,7 +4,7 @@ An end-to-end **HD Radio (NRSC-5) network streamer and e-paper desktop controlle
 
 1. **`nas-stack/` (Synology NAS / Linux Docker Stack)**:
    - Tunes over-the-air North American digital HD Radio broadcasts (`HD1`, `HD2`, `HD3`, etc.) using an **RTL-SDR USB dongle** and [`theori-io/nrsc5`](https://github.com/theori-io/nrsc5).
-   - Maintains a **persistent, uninterrupted MP3 Icecast stream** (`/hdradio`) so network speakers (Sonos, Home Assistant, VLC, etc.) **never disconnect or drop playback** while switching stations.
+   - Maintains a **persistent, uninterrupted Icecast audio stream** (`/hdradio`, AAC 320k / MP3) so network speakers (Sonos, Home Assistant, VLC, etc.) **never disconnect or drop playback** while switching stations.
    - Exposes a lightweight **FastAPI REST service** (`:8751`) for tuning channels, inspecting live Program Service Data (Title, Artist, Album, Station Callsign, MER/BER signal metrics), and a built-in web UI.
 2. **`esp32-firmware/` (Elecrow CrowPanel ESP32-S3 5.79" E-Paper Controller)**:
    - Custom firmware for the **Elecrow CrowPanel 5.79" E-Paper HMI Display** (`792×272` monochrome, dual SSD1683 controllers, ESP32-S3-WROOM-1-N8R8).
@@ -19,12 +19,12 @@ An end-to-end **HD Radio (NRSC-5) network streamer and e-paper desktop controlle
 +-----------------------------------------------------------------------------------+
 | Synology NAS (Docker Compose)                                                     |
 |                                                                                   |
-|  [RTL-SDR USB] --> [nrsc5] --(PCM)--> [20ms Pacer] --> [FFmpeg] --> [Icecast2]    |
-|                       |              (Silence on tune)             (:8750/hdradio)|
+|  [RTL-SDR USB] --> [nrsc5] ------------(PCM)-------------> [FFmpeg] --> [Icecast2]    |
+|                       |                                            (:8750/hdradio)|
 |                       +--(PSD / MER)--> [FastAPI :8751]                   |       |
 +------------------------------------------------|--------------------------|-------+
                                                  |                          |
-                  POST /api/tune                 | GET /api/status          | HTTP MP3 Stream
+                  POST /api/tune                 | GET /api/status          | HTTP Audio Stream
                   (Next Station)                 v                          v
 +--------------------------------------------------------+       +------------------+
 | Elecrow CrowPanel 5.79" E-Paper (ESP32-S3, 792x272)    |       | Sonos / Speakers |

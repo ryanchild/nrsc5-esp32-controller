@@ -156,10 +156,15 @@ class TunerManager:
         mount = os.environ.get("ICECAST_MOUNT", "/hdradio").strip() or "/hdradio"
         if not mount.startswith("/"):
             mount = "/" + mount
-        bitrate = os.environ.get("MP3_BITRATE", "192k").strip() or "192k"
+        codec = os.environ.get("AUDIO_CODEC", "aac").strip().lower() or "aac"
+        bitrate = (
+            os.environ.get("AUDIO_BITRATE")
+            or os.environ.get("MP3_BITRATE")
+            or "320k"
+        ).strip() or "320k"
 
         icecast_url = f"icecast://source:{icecast_pw}@{icecast_host}:{icecast_port}{mount}"
-        return [
+        cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel",
@@ -172,18 +177,38 @@ class TunerManager:
             str(CHANNELS),
             "-i",
             "pipe:0",
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            bitrate,
-            "-content_type",
-            "audio/mpeg",
-            "-ice_name",
-            "NRSC-5 HD Radio",
-            "-f",
-            "mp3",
-            icecast_url,
         ]
+
+        if codec == "mp3":
+            cmd.extend([
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                bitrate,
+                "-content_type",
+                "audio/mpeg",
+                "-ice_name",
+                "NRSC-5 HD Radio",
+                "-f",
+                "mp3",
+                icecast_url,
+            ])
+        else:
+            # Default to AAC with ADTS framing for native Icecast & Sonos compatibility
+            cmd.extend([
+                "-c:a",
+                "aac",
+                "-b:a",
+                bitrate,
+                "-content_type",
+                "audio/aac",
+                "-ice_name",
+                "NRSC-5 HD Radio",
+                "-f",
+                "adts",
+                icecast_url,
+            ])
+        return cmd
 
     def start(self) -> None:
         if self._running:
