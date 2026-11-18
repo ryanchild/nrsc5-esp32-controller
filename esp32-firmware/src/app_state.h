@@ -47,6 +47,7 @@ struct RadioProgramData {
 
 struct WeatherData {
     bool valid = false;
+    bool error = false;
     float currentTemp = 0.0f;
     float highTemp = 0.0f;
     float lowTemp = 0.0f;

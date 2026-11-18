@@ -202,9 +202,13 @@ void DisplayManager::drawDashboard(const AppState& state) {
         u8g2.setCursor(hiLoX, 75);
         u8g2.print(hiLoBuf);
     } else {
-        u8g2.setFont(u8g2_font_helvR12_tr);
+        u8g2.setFont(u8g2_font_helvB14_tr);
         u8g2.setCursor(rightX, 74);
-        u8g2.print("Weather updating...");
+        if (state.weather.error) {
+            u8g2.print("Failed to fetch weather data");
+        } else {
+            u8g2.print("Weather updating...");
+        }
     }
 
     // ========================================================================

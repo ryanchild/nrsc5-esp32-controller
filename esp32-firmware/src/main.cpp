@@ -78,6 +78,9 @@ void setup() {
         }
         gNet.syncMediaState(gState);
         gNet.fetchWeather(gState.weather);
+    } else {
+        gState.weather.valid = false;
+        gState.weather.error = true;
     }
 
     // Initial full refresh at boot
@@ -101,6 +104,13 @@ void loop() {
 
         case InputEvent::MENU_LONG_PRESS:
             gNet.updateClock(gState);
+            if (gState.wifiConnected) {
+                gNet.fetchWeather(gState.weather);
+            } else {
+                gState.weather.valid = false;
+                gState.weather.error = true;
+            }
+            gLastWeatherPollMs = millis();
             gDisplay.renderFull(gState);
             break;
 
@@ -180,14 +190,17 @@ void loop() {
         }
     }
 
-    // 5. Refresh Open-Meteo weather every 15 minutes -> Partial refresh
-    if ((now - gLastWeatherPollMs) >= WEATHER_POLL_INTERVAL_MS) {
+    // 5. Refresh weather every 15 minutes (or retry in 2m on error) -> Partial refresh
+    unsigned long weatherInterval = gState.weather.error ? 120000UL : WEATHER_POLL_INTERVAL_MS;
+    if ((now - gLastWeatherPollMs) >= weatherInterval) {
         gLastWeatherPollMs = now;
         if (gState.wifiConnected) {
-            if (gNet.fetchWeather(gState.weather)) {
-                gDisplay.renderPartial(gState);
-            }
+            gNet.fetchWeather(gState.weather);
+        } else {
+            gState.weather.valid = false;
+            gState.weather.error = true;
         }
+        gDisplay.renderPartial(gState);
     }
 
     delay(10);

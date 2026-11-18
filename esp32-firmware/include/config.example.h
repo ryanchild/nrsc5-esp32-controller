@@ -56,7 +56,7 @@ static const size_t STATION_PRESET_COUNT =
     sizeof(STATION_PRESETS) / sizeof(STATION_PRESETS[0]);
 
 // ============================================================================
-// 5. Weather Configuration (Open-Meteo API - No API Key Required)
+// 5. Weather Configuration (weather.gov / NWS API - No API Key Required)
 // ============================================================================
 #define WEATHER_LAT      47.6062f
 #define WEATHER_LON     -122.3321f
@@ -85,7 +85,7 @@ static const size_t STATION_PRESET_COUNT =
 
 // Polling intervals
 #define STATUS_POLL_INTERVAL_MS    5000UL      // Poll NAS /api/status every 5s
-#define WEATHER_POLL_INTERVAL_MS   900000UL    // Refresh Open-Meteo every 15m
+#define WEATHER_POLL_INTERVAL_MS   900000UL    // Refresh weather.gov every 15m
 #define TUNE_DEBOUNCE_MS           400UL       // Debounce rapid preset presses
 
 // ============================================================================
